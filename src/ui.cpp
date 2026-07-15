@@ -676,6 +676,14 @@ void renderSensitivityMenu() {
 void renderStatsScreen() {
   display.setFont(u8g2_font_6x10_tf);
   display.drawStr(0, 9, "Statistik:");
+  // Right-aligned firmware version; long between-release strings
+  // ("v0.1.0-3-g...") clip at the panel edge -- the full string is always in
+  // the serial boot line and the `status` output.
+  int verX = 128 - 6 * static_cast<int>(strlen(FIRMWARE_VERSION));
+  if (verX < 66) {
+    verX = 66; // keep clear of the "Statistik:" label, clip the tail instead
+  }
+  display.drawStr(verX, 9, FIRMWARE_VERSION);
   display.drawHLine(0, 12, 128);
 
   uint32_t upMin = millis() / 60000UL;
@@ -805,6 +813,10 @@ void begin() {
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   display.begin();
   enterIdle();
+  // The firmware version doubles as the very first "event": visible on the
+  // idle screen right after boot ("which version is your device on?"), then
+  // naturally displaced by real events.
+  showToast("FW " FIRMWARE_VERSION);
   wakeDisplay(); // boot always shows the startup screen for the first window
   render();
 }

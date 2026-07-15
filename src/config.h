@@ -9,6 +9,13 @@
 
 #include <Arduino.h>
 
+// Injected by platformio.ini from `git describe --tags` (SemVer tags, e.g.
+// "v0.1.0" or "v0.1.0-3-g8f0e765-dirty" between releases). Fallback for
+// build paths that don't pass the flag.
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "dev"
+#endif
+
 // ---------------------------------------------------------------------------
 // LoRa radio (SX1262 on the Wio-SX1262 board, connected via B2B connector)
 // ---------------------------------------------------------------------------

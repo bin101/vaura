@@ -153,8 +153,8 @@ void begin() {
     cachedChannel = 0; // corrupt flash content -> back to the common default
   }
 
-  Serial.printf("Node-ID: %04X  Spitzname: %s  Kanal: %u  (Konsole: 'help')\n", cachedNodeId,
-                nicknameBuf, cachedChannel);
+  Serial.printf("Node-ID: %04X  Spitzname: %s  Kanal: %u  FW %s  (Konsole: 'help')\n", cachedNodeId,
+                nicknameBuf, cachedChannel, FIRMWARE_VERSION);
 }
 
 const char *nickname() { return nicknameBuf; }
