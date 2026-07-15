@@ -286,6 +286,32 @@ def split_around_nvs(firmware_path):
     return parts
 
 
+def restart_device(port, log_cb, attempts=8, delay_s=0.3):
+    """Forces and waits out a full reboot after flashing. esptool's own
+    "--after hard_reset" already resets the chip, but the native USB-CDC port
+    briefly disappears and re-enumerates during that reset, so opening it
+    again (retrying while the OS catches up) both guarantees a real restart
+    (see open_device_serial) and lets us confirm it actually came back up."""
+    import serial
+
+    last_error = None
+    for _ in range(attempts):
+        try:
+            ser = open_device_serial(port)
+            break
+        except serial.SerialException as e:
+            last_error = e
+            time.sleep(delay_s)
+    else:
+        log_cb(f"Could not reconnect after flashing ({last_error}) -- "
+               "unplug and replug the device to be sure it restarted.")
+        return
+    try:
+        wait_for_device_boot(ser)
+    finally:
+        ser.close()
+
+
 def flash_firmware(port, firmware_path, log_cb, progress_cb):
     args = [
         "--chip", "esp32s3",
@@ -313,7 +339,9 @@ def flash_firmware(port, firmware_path, log_cb, progress_cb):
             Path(path).unlink(missing_ok=True)
     if ok:
         progress_cb(100)
-        log_cb("Done! The device is now running the new firmware.")
+        log_cb("Flash complete -- restarting the device ...")
+        restart_device(port, log_cb)
+        log_cb("Done! The device has restarted and is now running the new firmware.")
     else:
         log_cb(
             "Flashing failed. Tips: try a different USB cable/port; "
