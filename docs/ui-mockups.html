@@ -292,7 +292,7 @@
   <p class="eyebrow">Firmware · ui.cpp · SSD1306 128×64</p>
   <h1>Wie die Ein-Taster-Bedienung auf dem Display aussieht</h1>
   <p class="lede">
-    Jeder Bildschirmzustand aus <code>ui.cpp</code>: die Ruhe-Anzeige mit ihrer nach
+    Jeder Bildschirmzustand aus <code>ui.cpp</code>: die Kanal-Abfrage beim Boot, die Ruhe-Anzeige mit ihrer nach
     Signalstärke sortierten Fahrerliste (allein / 1 / 2 / 3 Spalten, stumm, Akku-Hinweis),
     das Sende-Menü, eine eingehende Warnung, der „Noch abgerissen"-Prompt, die Einstellungen
     (Stumm/Statistik/Ton/Anzeige/Empfindlich/Kanal/Name/Test — Ton und Empfindlichkeit mit
@@ -314,6 +314,24 @@
 </div>
 
 <div class="grid">
+  <p class="row-label">Boot: Kanal-Abfrage</p>
+
+  <figure class="device">
+    <div class="bezel">
+      <div class="screen">
+        <div class="pixel s-header"><span>Kanal waehlen:</span></div>
+        <div class="pixel s-hline"></div>
+        <div class="pixel s-big">Kanal 0</div>
+        <div class="pixel s-alert">Start in 7s ...</div>
+        <div class="pixel s-footer is-fresh">kurz=aendern lang=OK</div>
+      </div>
+    </div>
+    <figcaption>
+      <span class="cap-title">Kanal-Abfrage direkt nach dem Boot</span>
+      <span class="cap-body">Erster Bildschirm nach dem Einschalten: <b>Kurzdruck</b> blättert 0–9 (setzt den Countdown zurück), <b>Langdruck</b> bestätigt; ohne Eingabe startet die angezeigte Auswahl nach 10&nbsp;s automatisch. Bis zur Bestätigung sendet das Gerät <b>keine Heartbeats</b>; ein Doppelklick bestätigt, statt blind zu warnen.</span>
+    </figcaption>
+  </figure>
+
   <p class="row-label">Ruhe-Anzeige — Fahrerliste, schwächstes Signal zuoberst</p>
 
   <figure class="device">
@@ -468,7 +486,7 @@
   <figure class="device">
     <div class="bezel">
       <div class="screen">
-        <div class="pixel s-header"><span>Statistik:</span></div>
+        <div class="pixel s-header"><span>Statistik:</span><span>v0.1.0</span></div>
         <div class="pixel s-hline"></div>
         <div class="pixel s-list1">Fahrzeit&nbsp;&nbsp;&nbsp;&nbsp;2:13h</div>
         <div class="pixel s-list2">Warn gesendet&nbsp;&nbsp;&nbsp;&nbsp;3</div>
@@ -479,7 +497,7 @@
     </div>
     <figcaption>
       <span class="cap-title">Statistik</span>
-      <span class="cap-body">Die laufende Tour seit dem Einschalten: Fahrzeit, gesendete/empfangene Warnungen, Abrisse. Bewusst nicht gespeichert — jede Tour beginnt bei null. <b>Langdruck</b> zurück.</span>
+      <span class="cap-body">Die laufende Tour seit dem Einschalten: Fahrzeit, gesendete/empfangene Warnungen, Abrisse. Bewusst nicht gespeichert — jede Tour beginnt bei null. Rechts oben die Firmware-Version. <b>Langdruck</b> zurück.</span>
     </figcaption>
   </figure>
 

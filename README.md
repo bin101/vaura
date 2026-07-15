@@ -86,6 +86,8 @@ pio test -e native           # Unit-Tests, laufen auf dem Rechner (keine Hardwar
 
 Alle Geräte bekommen **dieselbe** Firmware — es gibt keine Kompilierzeit-Unterschiede zwischen den Geräten.
 
+**Versionierung:** Das Projekt nutzt [Semantic Versioning](https://semver.org/lang/de/) über Git-Tags (`v0.1.0`, `v0.2.0`, …) und [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:` …). Die Firmware bekommt ihre Version beim Bauen automatisch aus `git describe` (`FIRMWARE_VERSION`, zwischen Releases z. B. `v0.1.0-5-gabc1234`, mit `-dirty` bei lokalen Änderungen) und zeigt sie beim Boot in der Ereigniszeile, in der Statistik-Kopfzeile, in der seriellen Boot-Zeile und in der `status`-Ausgabe — so ist am Treffpunkt schnell geklärt, wer welche Version fährt.
+
 Die Unit-Tests (in `test/`) decken das Funk-Paketformat (`src/protocol.cpp`: Encode/Decode-Roundtrips, kaputte Pakete) und die Akku-Spannungskurve (`src/battery_curve.cpp`) ab. Bei jedem Push baut GitHub Actions (`.github/workflows/ci.yml`) zusätzlich die Firmware und lässt die Tests laufen.
 
 ## Flashen ohne PlatformIO: der Warngerät-Flasher
@@ -93,6 +95,8 @@ Die Unit-Tests (in `test/`) decken das Funk-Paketformat (`src/protocol.cpp`: Enc
 Für Nutzer, die **nicht** selbst kompilieren wollen, gibt es eine GUI-App (macOS/Linux/Windows): Gerät per USB-C anschließen, „Neueste Version herunterladen", Port auswählen (das Warngerät wird automatisch markiert und vorausgewählt), „Firmware flashen" — fertig. Alle am Gerät gespeicherten Einstellungen (Spitzname, Tonfrequenz, Anzeige-Abschaltzeit usw.) bleiben dabei erhalten: Die App schreibt das Merged-Binary in zwei Teilen und spart den NVS-Einstellungsbereich (0x9000–0xDFFF) gezielt aus.
 
 **Download:** Die fertigen Apps hängen an jedem GitHub-Release: `Warngeraet-Flasher-macos-apple-silicon.zip`, `-macos-intel.zip`, `-linux-x86_64`, `-windows.exe` — plus `warngeraet-firmware.bin` (das Merged-Binary, das die App lädt; auch manuell flashbar: `esptool --chip esp32s3 write_flash 0x0 warngeraet-firmware.bin` — **Achtung:** anders als die App überschreibt das manuelle Voll-Flashen an 0x0 auch den NVS-Bereich, sämtliche Geräte-Einstellungen müssen danach neu gesetzt werden).
+
+**Geräte-Einstellungen ohne Flashen:** Der Bereich **„4. Gerät"** in der App verbindet sich mit der seriellen Konsole der laufenden Firmware. „Auslesen" zeigt **Node-ID, Spitzname und Firmware-Version** — der Beleg, dass wirklich das erwartete Gerät am Kabel hängt — und füllt die Felder Name, Kanal, Empfindlichkeit, Ton-Stufe und Anzeige-Abschaltzeit. „Übernehmen" schreibt nur die geänderten Werte und liest den tatsächlichen Gerätestand zurück. Hinweis: Das Verbinden startet das Gerät neu (macOS-Treiberverhalten am USB-Port) — die Kanal-Abfrage erscheint erneut und die Tour-Statistik beginnt bei null.
 
 Plattform-Hinweise für Nutzer:
 
@@ -141,7 +145,23 @@ Die Node-ID wird automatisch aus der Chip-MAC-Adresse abgeleitet — keine Konfi
 name ROB
 ```
 
-Beliebiges Kürzel, **nur Buchstaben, max. 5 Zeichen** (keine Zahlen — dieselbe Regel wie beim Namen-ändern-Menü am Gerät, siehe unten) — **kein echter Name nötig**. Der Spitzname wird dauerhaft im Flash gespeichert (bleibt nach Neustart/Akku-leer erhalten). `help` zeigt alle Konsolenbefehle, `id` zeigt die Node-ID.
+Beliebiges Kürzel, **nur Buchstaben, max. 5 Zeichen** (keine Zahlen — dieselbe Regel wie beim Namen-ändern-Menü am Gerät, siehe unten) — **kein echter Name nötig**. Der Spitzname wird dauerhaft im Flash gespeichert (bleibt nach Neustart/Akku-leer erhalten).
+
+Die Konsole kann inzwischen **alle** Geräte-Einstellungen (Groß-/Kleinschreibung egal):
+
+| Befehl | Wirkung |
+|---|---|
+| `help` | Übersicht aller Befehle |
+| `id` | Node-ID anzeigen |
+| `status` | alle Einstellungen maschinenlesbar als `key=value` (Name, ID, Version, Kanal, Empfindlichkeit, Tonstufe, Anzeige) |
+| `name <KÜRZEL>` | Spitznamen setzen |
+| `kanal <0–9>` | Funk-Kanal setzen (wirkt sofort) |
+| `empfindlich <0–10>` | SCHWACH-Empfindlichkeitsstufe setzen |
+| `ton <0–10>` | Piezo-Tonstufe setzen (spielt Testton) |
+| `anzeige <0\|15\|30\|60\|300>` | Display-Abschaltzeit in Sekunden (0 = nie) |
+| `beep [Hz]` | Testton abspielen |
+
+Wer keinen `pio device monitor` zur Hand hat: Der **Warngerät-Flasher** hat dafür den Bereich „Gerät" (siehe Flasher-Abschnitt oben) — gleiche Befehle, mit Formularfeldern.
 
 **Piezo-Lautstärke abstimmen:** `beep <Hz>` spielt über dieselbe Konsole einen ~600-ms-Testton bei der angegebenen Frequenz (z. B. `beep 3200`), ohne dass neu geflasht werden muss. Ein Software-Lautstärkeregler existiert bei der aktuellen Ein-Transistor-Schaltung nicht (der Piezo wird nur ein-/ausgeschaltet, keine Zwischenstufen) — die Frequenz ist der einzige Hebel, weil ein Piezo an seiner mechanischen Resonanz am lautesten ist. Die tatsächlich genutzte Frequenz ist **kein** Compile-Zeit-Wert mehr, sondern zur Laufzeit einstellbar und im Flash gespeichert (Standard: 3000 Hz, einstellbarer Bereich 2500–3500 Hz) — entweder direkt am Gerät (siehe „Einstellungen" unten; dort als **Stufe 0–10** auf einer Lineal-Skala dargestellt, Stufe = (Hz − 2500) / 100, Standard 3000 Hz = Stufe 5) oder indem man mit `beep <Hz>` erst einen guten Wert findet und ihn dann am Gerät übernimmt.
 
@@ -151,14 +171,17 @@ Die 5-Zeichen-Grenze ist kein Rundwert, sondern gerechnet: Die Ruhe-Anzeige list
 
 ## UI-Mockups
 
-`docs/ui-mockups.html` (im Browser öffnen) zeigt **jeden** Bildschirmzustand aus `ui.cpp` als Bild: Ruhe-Anzeige (Allein / 1-, 2- und 3-Spalten-Fahrerliste / stumm + Akku-Hinweis), Sende-Menü, eingehende Warnung, „Noch abgerissen"-Prompt, Einstellungen, Statistik, Ton und Empfindlichkeit (beide mit Lineal-Skala), Anzeige (Display-Abschaltzeit), Kanal, Namen ändern und Reichweiten-Test (normal + Abriss).
+`docs/ui-mockups.html` (im Browser öffnen) zeigt **jeden** Bildschirmzustand aus `ui.cpp` als Bild: Kanal-Abfrage beim Boot, Ruhe-Anzeige (Allein / 1-, 2- und 3-Spalten-Fahrerliste / stumm + Akku-Hinweis), Sende-Menü, eingehende Warnung, „Noch abgerissen"-Prompt, Einstellungen, Statistik, Ton und Empfindlichkeit (beide mit Lineal-Skala), Anzeige (Display-Abschaltzeit), Kanal, Namen ändern und Reichweiten-Test (normal + Abriss).
 
 ## Bedienung (ein Taster)
 
-**Doppelklick = Sofort-Warnung:** Aus **jedem** Zustand — auch bei schlafendem Display, auch mitten in einem Menü — sendet ein Doppelklick sofort die generische Warnung **ACHTUNG!**, ohne Menü und ohne hinzusehen. Bewusst generisch: eine Blind-Geste darf nichts Konkretes behaupten, das falsch sein könnte. (Technische Nebenwirkung: Weil die Firmware nach jedem Klick auf einen möglichen zweiten wartet, reagiert ein Einzelklick minimal verzögert — die Wartezeit ist `BUTTON_CLICK_MS` in `src/config.h`.)
+**Kanal-Abfrage beim Einschalten:** Direkt nach dem Boot fragt das Gerät zuerst den Funk-Kanal ab (`Kanal waehlen:` mit sichtbarem `Start in Ns`-Countdown), damit man gleich der richtigen Gruppe beitritt. Kurzdruck blättert 0–9 (setzt den Countdown zurück), Langdruck bestätigt; ohne Eingabe bestätigt sich die angezeigte Auswahl nach 10 s selbst — ein unbeaufsichtigter Neustart (z. B. Akku-Aussetzer unterwegs) hängt also nie in der Abfrage. **Bis zur Bestätigung sendet das Gerät keine Heartbeats** und eine eingehende Warnung piept nur, übernimmt aber nicht den Bildschirm; ein Doppelklick bestätigt (statt blind auf einen womöglich falschen Kanal zu warnen). Ein Kanalwechsel leert die Fahrerliste — Fahrer vom alten Kanal wären sonst Minuten später falsche Abrisse.
+
+**Doppelklick = Sofort-Warnung:** Aus **jedem** Zustand (außer der Kanal-Abfrage, s. o.) — auch bei schlafendem Display, auch mitten in einem Menü — sendet ein Doppelklick sofort die generische Warnung **ACHTUNG!**, ohne Menü und ohne hinzusehen. Bewusst generisch: eine Blind-Geste darf nichts Konkretes behaupten, das falsch sein könnte. (Technische Nebenwirkung: Weil die Firmware nach jedem Klick auf einen möglichen zweiten wartet, reagiert ein Einzelklick minimal verzögert — die Wartezeit ist `BUTTON_CLICK_MS` in `src/config.h`.)
 
 | Zustand | Kurzdruck | Langdruck |
 |---|---|---|
+| Kanal wählen (direkt nach dem Boot) | nächster Kanal (0–9), setzt den Countdown zurück | bestätigt den Kanal, Gerät startet den Funkbetrieb |
 | Ruhe-Anzeige | öffnet Sende-Menü | öffnet Einstellungen |
 | Sende-Menü | nächste Warnung durchblättern (4 Warnungen) | markierte Warnung senden |
 | Eingehende Warnung | wegklicken | (keine Funktion) |
@@ -232,7 +255,7 @@ Langdruck aus der Ruhe-Anzeige öffnet die Einstellungen — nützlich unterwegs
   | 10 | −90 dBm | sehr früh — warnt schon bei leichtem Zurückfallen |
 
   Die zweite Bedingung (nachhaltiger Abfall ≥ 6 dB unter die eigene Baseline) bleibt auf allen Stufen gleich — die Stufe bestimmt nur, **ab welcher Signalstärke** gewarnt wird. Zum Kalibrieren im Feld: Reichweiten-Test (unten) zeigt live den Wert, den diese Logik beurteilt.
-- **Kanal** → Funk-Kanal 0–9 der Gruppe. **Alle Geräte einer Ausfahrt müssen denselben Kanal haben** — verschiedene Kanäle hören sich gegenseitig überhaupt nicht (ein Kanal-Versehen sieht aus, als wären alle abgerissen). Langdruck speichert und schaltet sofort um. Standard: Kanal 0. Nützlich, wenn zwei Gruppen gleichzeitig unterwegs sind.
+- **Kanal** → Funk-Kanal 0–9 der Gruppe (derselbe, den auch die Kanal-Abfrage beim Boot einstellt). **Alle Geräte einer Ausfahrt müssen denselben Kanal haben** — verschiedene Kanäle hören sich gegenseitig überhaupt nicht (ein Kanal-Versehen sieht aus, als wären alle abgerissen). Langdruck speichert, schaltet sofort um und leert die Fahrerliste (Fahrer vom alten Kanal wären sonst falsche Abrisse). Standard: Kanal 0. Nützlich, wenn zwei Gruppen gleichzeitig unterwegs sind.
 - **Name** → wie im übernächsten Abschnitt beschrieben.
 - **Test** → Reichweiten-Test, siehe nächster Abschnitt.
 - **Zurück** → verlässt die Einstellungen sofort, ohne etwas zu ändern.
@@ -277,8 +300,8 @@ EU868, 868,3 MHz, **GFSK** (nicht LoRa) bei 19,2 kb/s, ~10 kHz Frequenzhub, 46,9
 
 Mit **mindestens 2 Geräten**:
 
-1. `pio run -t upload` auf beide (alle Geräte zusammen — v2 ist funk-inkompatibel mit v1, s. o.), dann je einmal Spitznamen setzen.
-2. Beide einschalten → nach wenigen Sekunden zeigt jedes Gerät den anderen Fahrer in der Liste (mit RSSI) und `2/2` in der Kopfzeile (der Zähler schließt das eigene Gerät ein).
+1. `pio run -t upload` auf beide (alle Geräte zusammen — v2 ist funk-inkompatibel mit v1, s. o.), dann je einmal Spitznamen setzen (Konsole, oder bequemer: Flasher → „Gerät").
+2. Beide einschalten → die **Kanal-Abfrage** erscheint mit Countdown; Langdruck (oder 10 s warten) bestätigt Kanal 0. Die Ereigniszeile zeigt danach kurz die Firmware-Version (`FW v0.1.x`), und nach wenigen Sekunden erscheint der jeweils andere Fahrer in der Liste (mit RSSI) samt `2/2` in der Kopfzeile (der Zähler schließt das eigene Gerät ein).
 3. Kurzdruck → durchblättern → Langdruck auf "AUTO HINTEN" → das andere Gerät zeigt die Warnung + piept 2× kurz. Kurzdruck dort blendet sie wieder aus.
 4. **Doppelklick** an einem Gerät (auch bei schlafendem Display) → das andere zeigt sofort `ACHTUNG!`.
 5. Geräte ≥ 30 min nebeneinander liegen lassen → **keine** spontanen `ABRISS`/`ZURUECK`-Ereignisse in der Ereigniszeile (genau das war der Fehlalarm-Bug der 4-s-Schwelle ohne Jitter-Marge).
