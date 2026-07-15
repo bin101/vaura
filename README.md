@@ -1,320 +1,321 @@
-# Rennradclub-Warngerät (XIAO ESP32-S3 + Wio-SX1262)
+# Vaura — Cycling Club Warning Device (XIAO ESP32-S3 + Wio-SX1262)
 
-Eigenständige Firmware für das Case ["Meshtastic Seeed Studio XIAO ESP32S3 & Wio SX1262 case MOD with screen and INA219 voltage reader" von *Lead*](https://www.printables.com/model/1433873-meshtastic-seeed-studio-xiao-esp32s3-wio-sx1262-ca). Nutzt das Wio-SX1262-Funkmodul im **GFSK-Modus**, nicht im namensgebenden LoRa-Modus — siehe "Funkprotokoll" weiter unten für die Begründung.
-Kein Meshtastic an Bord — eigenes, schlankes Broadcast-Protokoll, zugeschnitten auf eine Ausfahrt mit 6–12 Fahrern:
+Standalone firmware for the case ["Meshtastic Seeed Studio XIAO ESP32S3 & Wio SX1262 case MOD with screen and INA219 voltage reader" by *Lead*](https://www.printables.com/model/1433873-meshtastic-seeed-studio-xiao-esp32s3-wio-sx1262-ca). Uses the Wio-SX1262 radio module in **GFSK mode**, not the namesake LoRa mode — see "Radio protocol" further down for the reasoning.
+No Meshtastic on board — its own lean broadcast protocol, tailored to a group ride of 6–12 riders:
 
-- **Gefahren-Buttons**: Auto von hinten, Gefahrenstelle voraus, Bremsen/Stopp, Sammeln/Warten
-- **Automatische Abriss-Erkennung** über Heartbeat + Signalstärke (kein GPS nötig)
-- **Akkuanzeige** über den bereits verbauten INA219
+- **Hazard buttons**: car behind, hazard ahead, braking/stopping, regroup/wait
+- **Automatic drop-off detection** via heartbeat + signal strength (no GPS needed)
+- **Battery display** via the already-fitted INA219
 
-## Hardware (wie im Case verbaut)
+## Hardware (as fitted in the case)
 
-| Komponente | Detail |
+| Component | Detail |
 |---|---|
 | MCU | Seeed Studio XIAO ESP32-S3 |
-| Funk | Wio-SX1262 (LoRa), auf XIAO gesteckt (B2B-Anschluss) |
-| Display | 0,96" OLED SSD1306, 128×64, I²C (Zweifarb-Panel: obere 16 Pixelzeilen gelb, Rest blau) |
-| Akku-Monitor | INA219, I²C, High-Side |
-| Akku | LiPo 803040, 1000 mAh |
-| Taster | 1× taktil |
-| Piezo-Beeper | 1× Piezo-Element, geschaltet über NPN-Transistor (z. B. 2N2222) |
+| Radio | Wio-SX1262 (LoRa), plugged onto the XIAO (B2B connector) |
+| Display | 0.96" OLED SSD1306, 128×64, I²C (two-tone panel: top 16 pixel rows yellow, rest blue) |
+| Battery monitor | INA219, I²C, high-side |
+| Battery | LiPo 803040, 1000 mAh |
+| Button | 1× tactile |
+| Piezo beeper | 1× piezo element, switched via NPN transistor (e.g. 2N2222) |
 
-> **Region/Antenne:** Diese Firmware ist fest auf **EU868 (868,3 MHz)** eingestellt (siehe `src/config.h`). Das verlinkte Case ist mit "915mhz" (US) getaggt — **prüfe vor dem ersten Einschalten, dass eine 868-MHz-Antenne verbaut ist**, sonst leidet die Reichweite deutlich. Sendeleistung ist auf 14 dBm begrenzt (EU868-SRD-Grenzwert).
+> **Region/antenna:** This firmware is fixed to **EU868 (868.3 MHz)** (see `src/config.h`). The linked case is tagged "915mhz" (US) — **verify before first power-on that an 868 MHz antenna is fitted**, otherwise range suffers noticeably. Transmit power is capped at 14 dBm (EU868 SRD limit).
 
-## Bauplan / Verdrahtung
+## Build plan / wiring
 
-Entspricht 1:1 dem Aufbau des Case-Autors — **keine neue Verdrahtung nötig**, wenn du dich an dessen Anleitung gehalten hast. Zur Nachvollziehbarkeit hier noch mal zusammengefasst:
+Matches the case author's build 1:1 — **no new wiring needed** if you followed their instructions. Summarized here for traceability:
 
-1. **LoRa:** Wio-SX1262 auf den XIAO stecken (Board-to-Board-Anschluss), 868-MHz-Antenne anschrauben.
-2. **I²C-Kette** (Kupferlack-/Magnetdraht, ca. 4 cm reichen): INA219 → OLED → XIAO, jeweils **GND / 3V3 / SDA / SCL** durchverbinden.
-3. **Strompfad / Akkumessung:** Akku(+) → INA219 **Vin+** (High Side) → INA219 **Vin−** → Ein/Aus-Schalter → XIAO **BAT+**. Akku(−) direkt an XIAO **BAT−**.
-4. **Taster:** ein Bein an GND (z. B. am OLED), das andere an **D3 / GPIO4**.
-5. **Piezo-Beeper** (über NPN-Transistor als Low-Side-Schalter, z. B. 2N2222 — die GPIO liefert nicht genug Strom für den Piezo direkt):
+1. **LoRa:** plug the Wio-SX1262 onto the XIAO (board-to-board connector), screw on the 868 MHz antenna.
+2. **I²C chain** (enamel/magnet wire, ~4 cm is enough): INA219 → OLED → XIAO, connecting **GND / 3V3 / SDA / SCL** through each.
+3. **Power path / battery sensing:** battery(+) → INA219 **Vin+** (high side) → INA219 **Vin−** → on/off switch → XIAO **BAT+**. battery(−) directly to XIAO **BAT−**.
+4. **Button:** one leg to GND (e.g. at the OLED), the other to **D3 / GPIO4**.
+5. **Piezo beeper** (via NPN transistor as a low-side switch, e.g. 2N2222 — the GPIO can't source enough current for the piezo directly):
    - Piezo (+) → **3V3**
-   - Piezo (−) → **Kollektor** des Transistors
-   - **Basis** des Transistors → 1 kΩ-Widerstand → **D1 / GPIO2** — **dieser Widerstand ist nicht optional:** ohne ihn liegt die Basis-Emitter-Strecke (eine Diode mit ~0,6–0,7 V Flussspannung) praktisch direkt am 3,3-V-GPIO, ohne Strombegrenzung. Das kann den maximal zulässigen Ausgangsstrom des GPIO-Pins überschreiten und diesen beschädigen.
-   - **Basis** des Transistors → zusätzlich 10 kΩ-Widerstand → **GND** (Pull-down, verhindert ein Zufalls-Piepsen beim Boot). Anders als GPIO3 ist GPIO2 **kein** Strapping-Pin des ESP32-S3 (siehe Kasten unten) — dieser Pull-down ist hier also reine Komfortsache, kein Muss.
-   - **Emitter** des Transistors → **GND**
-   - Keine Freilaufdiode nötig (nur bei induktiven Lasten wie Relais/Motor relevant, ein Piezo ist kapazitiv).
-   - **Warum D1/GPIO2 und nicht D2/GPIO3:** GPIO3 ist einer der ESP32-S3-Strapping-Pins (steuert die JTAG-Signalquelle beim Boot) und hat **keinen** eigenen internen Pull-Widerstand — alles, was extern an GPIO3 hängt, zählt zur Boot-Strapping-Beschaltung. GPIO2 hat keine solche Sonderrolle und ist damit die unkompliziertere Wahl für einen Piezo, der einfach nur an- und ausgeschaltet werden soll.
-   - **Achtung Pinbelegung:** "2N2222" ist kein einheitliches Pinout — PN2222A (TO-92) ist meist E-B-C, P2N2222A (TO-92) dagegen C-B-E, von links nach rechts bei flacher Seite zu dir. Vor dem Einlöten den genauen Aufdruck des eigenen Bauteils nachschlagen oder mit einer hFE-Transistortesterbuchse am Multimeter verifizieren.
-6. **Reihenfolge beim Bau:** zuerst alle Drähte am XIAO anlöten, **danach** Bauteile ins Gehäuse kleben (Heißkleber) — nicht umgekehrt, sonst kommt man an die Lötpads nicht mehr ran.
+   - Piezo (−) → transistor **collector**
+   - Transistor **base** → 1 kΩ resistor → **D1 / GPIO2** — **this resistor is not optional:** without it, the base-emitter junction (a diode with ~0.6–0.7 V forward voltage) sits practically directly on the 3.3 V GPIO with no current limiting. That can exceed the GPIO pin's maximum allowed output current and damage it.
+   - Transistor **base** → additionally a 10 kΩ resistor → **GND** (pull-down, prevents a random beep at boot). Unlike GPIO3, GPIO2 is **not** an ESP32-S3 strapping pin (see box below) — this pull-down is purely a nicety here, not a requirement.
+   - Transistor **emitter** → **GND**
+   - No flyback diode needed (only relevant for inductive loads like relays/motors; a piezo is capacitive).
+   - **Why D1/GPIO2 and not D2/GPIO3:** GPIO3 is one of the ESP32-S3's strapping pins (controls the JTAG signal source at boot) and has **no** internal pull resistor of its own — anything wired externally to GPIO3 counts as part of the boot-strapping circuit. GPIO2 has no such special role, making it the simpler choice for a piezo that just needs to switch on and off.
+   - **Watch the pinout:** "2N2222" is not a single standardized pinout — PN2222A (TO-92) is usually E-B-C, while P2N2222A (TO-92) is C-B-E, left to right with the flat side facing you. Check the exact print on your own part before soldering, or verify with an hFE transistor tester socket on a multimeter.
+6. **Build order:** solder all wires to the XIAO first, **then** glue components into the case (hot glue) — not the other way around, or you can no longer reach the solder pads.
 
-### Pin-Belegung (fest in `src/config.h`)
+### Pinout (fixed in `src/config.h`)
 
 ```
 LoRa SPI:      SCK=GPIO7   MISO=GPIO8   MOSI=GPIO9   NSS=GPIO41
-LoRa Steuerung: DIO1=GPIO39  RESET=GPIO42  BUSY=GPIO40  ANT_SW=GPIO38
+LoRa control:  DIO1=GPIO39  RESET=GPIO42  BUSY=GPIO40  ANT_SW=GPIO38
 I2C (OLED+INA219): SDA=GPIO5  SCL=GPIO6
-Taster:        GPIO4 (D3), gegen GND, interner Pull-up
-Piezo-Beeper:  GPIO2 (D1), über NPN-Transistor (1kΩ Basis, 10kΩ Pull-down)
+Button:        GPIO4 (D3), against GND, internal pull-up
+Piezo beeper:  GPIO2 (D1), via NPN transistor (1kΩ base, 10kΩ pull-down)
 ```
 
-Diese Pins gehören zum B2B-"Kit" (Wio-SX1262 aufgesteckt) — **nicht** zu der separat erhältlichen Wio-SX1262-Platine zum Anlöten, die andere Pins nutzt.
+These pins belong to the B2B "kit" (Wio-SX1262 plugged on) — **not** to the separately available Wio-SX1262 solder-in board, which uses different pins.
 
-### Steckbrett-Version für den ersten Test (nur USB, ohne Netzteil, ohne Akku)
+### Breadboard version for the first test (USB only, no power supply, no battery)
 
-Bevor irgendetwas ins Gehäuse geklebt wird, lohnt sich ein loser Aufbau auf einem Steckbrett — Strom kommt dabei ausschließlich über das USB-Kabel vom Rechner, kein Netzteil und (erstmal) kein Akku nötig:
+Before gluing anything into the case, a loose breadboard build is worth it — power comes exclusively from the USB cable to the computer, no power supply and (initially) no battery needed:
 
-1. **XIAO + Wio-SX1262 zusammenstecken** (Board-to-Board-Anschluss) und Antenne anschrauben — genau wie im finalen Aufbau. Die Antenne auch beim Steckbrett-Test **immer** aufschrauben, bevor gesendet wird (sonst riskiert man die PA-Endstufe).
-2. **XIAO ins Steckbrett stecken** (oder lose lassen und alles per Jumperkabel verbinden) und per **USB-C mit dem Rechner verbinden** — das versorgt den XIAO über dessen eigenen 3V3-Regler.
-3. **Stromschienen versorgen:** XIAO **3V3** → Plus-Schiene, XIAO **GND** → Minus-Schiene des Steckbretts.
-4. **OLED (SSD1306):** VCC → Plus-Schiene, GND → Minus-Schiene, SDA → GPIO5, SCL → GPIO6.
-5. **INA219:** VCC → Plus-Schiene, GND → Minus-Schiene, SDA → GPIO5 (gleicher I²C-Bus, parallel zum OLED), SCL → GPIO6. **Vin+/Vin−** bleiben ohne Akku offen (oder mit einem Draht überbrückt) — die Firmware erkennt den INA219 trotzdem über I²C und zeigt einfach `0` bzw. eine sinnlose Spannung an; das ist für den ersten Test ohne Akku normal und kein Fehler.
-6. **Taster:** ein Bein an die Minus-Schiene (GND), das andere an GPIO4 (D3).
-7. **Piezo-Beeper:** Transistor-Basis über 1 kΩ an GPIO2 (D1), zusätzlich 10 kΩ von der Basis zur Minus-Schiene, Emitter an die Minus-Schiene, Kollektor an Piezo (−), Piezo (+) an die Plus-Schiene (siehe "Bauplan" oben für die vollständige Erklärung inkl. Pinbelegungs-Vorsicht).
-8. **BAT+/BAT− am XIAO bleiben komplett unbeschaltet**, solange kein Akku getestet wird.
+1. **Plug XIAO + Wio-SX1262 together** (board-to-board connector) and screw on the antenna — exactly as in the final build. Always screw on the antenna for the breadboard test too, before transmitting (otherwise you risk the PA output stage).
+2. **Put the XIAO on the breadboard** (or leave it loose and connect everything via jumper wires) and connect via **USB-C to the computer** — this powers the XIAO through its own 3V3 regulator.
+3. **Power the rails:** XIAO **3V3** → plus rail, XIAO **GND** → minus rail of the breadboard.
+4. **OLED (SSD1306):** VCC → plus rail, GND → minus rail, SDA → GPIO5, SCL → GPIO6.
+5. **INA219:** VCC → plus rail, GND → minus rail, SDA → GPIO5 (same I²C bus, parallel to the OLED), SCL → GPIO6. **Vin+/Vin−** stay open without a battery (or bridged with a wire) — the firmware still detects the INA219 over I²C and simply shows `0` or a meaningless voltage; that's normal and not a bug for this first test without a battery.
+6. **Button:** one leg to the minus rail (GND), the other to GPIO4 (D3).
+7. **Piezo beeper:** transistor base via 1 kΩ to GPIO2 (D1), plus 10 kΩ from the base to the minus rail, emitter to the minus rail, collector to piezo (−), piezo (+) to the plus rail (see "Build plan" above for the full explanation including the pinout caveat).
+8. **BAT+/BAT− on the XIAO stay completely unconnected** as long as no battery is being tested.
 
-Damit lassen sich Display, Taster, Namensvergabe und LoRa-Senden/Empfangen bereits vollständig testen — nur die Akkuanzeige zeigt bis zum Anschluss eines echten Akkus keinen sinnvollen Wert. Für den vollständigen Test aus dem Abschnitt [Verifikation](#verifikation) (Abriss-Erkennung etc.) braucht es wie dort beschrieben mindestens zwei so aufgebaute Geräte, jedes an einem eigenen USB-Anschluss.
+This already lets you fully test the display, button, naming, and LoRa send/receive — only the battery display won't show a meaningful value until a real battery is connected. The full test from the [Verification](#verification) section (drop-off detection etc.) needs at least two devices built this way, as described there, each on its own USB port.
 
-Sobald der Steckbrett-Test erfolgreich war, kann optional ein Akku ergänzt werden (Akku(+) → INA219 Vin+ → Vin− → Ein/Aus-Schalter → XIAO BAT+, Akku(−) → XIAO BAT−, siehe Schritt 3 oben im Bauplan) — danach funktioniert das Gerät auch ohne USB-Kabel.
+Once the breadboard test succeeds, a battery can optionally be added (battery(+) → INA219 Vin+ → Vin− → on/off switch → XIAO BAT+, battery(−) → XIAO BAT−, see step 3 above in the build plan) — after that the device also works without a USB cable.
 
-### Für später reserviert (nicht bestückt)
+### Reserved for later (not populated)
 
-Frei bleiben GPIO1 (D0, ADC-fähig) und GPIO43/44 (D6/D7) — Platz für zusätzliche Taster oder einen Vibrationsmotor in einer späteren Ausbaustufe, ohne die bestehende Verdrahtung anzufassen. (GPIO2/D1 ist inzwischen für den Piezo-Beeper vergeben, siehe oben. GPIO3/D2 bewusst frei/unbeschaltet gelassen — Strapping-Pin, siehe Bauplan.)
+GPIO1 (D0, ADC-capable) and GPIO43/44 (D6/D7) stay free — room for extra buttons or a vibration motor in a later expansion stage, without touching the existing wiring. (GPIO2/D1 is now taken by the piezo beeper, see above. GPIO3/D2 deliberately left free/unconnected — strapping pin, see build plan.)
 
-## Firmware bauen & flashen
+## Building & flashing the firmware
 
-Voraussetzung: [PlatformIO](https://platformio.org/) (CLI oder VS-Code-Extension).
+Requires: [PlatformIO](https://platformio.org/) (CLI or VS Code extension).
 
 ```bash
-pio run                      # kompilieren
-pio run -t upload            # auf das per USB verbundene Gerät flashen
-pio device monitor           # serielle Konsole / Debug-Log (115200 Baud)
-pio test -e native           # Unit-Tests, laufen auf dem Rechner (keine Hardware nötig)
+pio run                      # compile
+pio run -t upload            # flash the USB-connected device
+pio device monitor           # serial console / debug log (115200 baud)
+pio test -e native           # unit tests, run on the computer (no hardware needed)
 ```
 
-Alle Geräte bekommen **dieselbe** Firmware — es gibt keine Kompilierzeit-Unterschiede zwischen den Geräten.
+Every device gets **the same** firmware — there are no compile-time differences between devices.
 
-**Versionierung:** Das Projekt nutzt [Semantic Versioning](https://semver.org/lang/de/) über Git-Tags (`v0.1.0`, `v0.2.0`, …) und [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:` …). Die Firmware bekommt ihre Version beim Bauen automatisch aus `git describe` (`FIRMWARE_VERSION`, zwischen Releases z. B. `v0.1.0-5-gabc1234`, mit `-dirty` bei lokalen Änderungen) und zeigt sie beim Boot in der Ereigniszeile, in der Statistik-Kopfzeile, in der seriellen Boot-Zeile und in der `status`-Ausgabe — so ist am Treffpunkt schnell geklärt, wer welche Version fährt.
+**Versioning:** The project uses [Semantic Versioning](https://semver.org/) via git tags (`v0.1.0`, `v0.2.0`, …) and [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:` …). The firmware picks up its version automatically at build time from `git describe` (`FIRMWARE_VERSION`, e.g. `v0.1.0-5-gabc1234` between releases, with `-dirty` on local changes) and shows it at boot in the event line, in the stats screen header, in the serial boot line, and in the `status` output — so it's quick to check who's running which version at the meeting point.
 
-Die Unit-Tests (in `test/`) decken das Funk-Paketformat (`src/protocol.cpp`: Encode/Decode-Roundtrips, kaputte Pakete) und die Akku-Spannungskurve (`src/battery_curve.cpp`) ab. Bei jedem Push baut GitHub Actions (`.github/workflows/ci.yml`) zusätzlich die Firmware und lässt die Tests laufen.
+The unit tests (in `test/`) cover the radio packet format (`src/protocol.cpp`: encode/decode roundtrips, malformed packets) and the battery voltage curve (`src/battery_curve.cpp`). On every push, GitHub Actions (`.github/workflows/ci.yml`) additionally builds the firmware and runs the tests.
 
-## Flashen ohne PlatformIO: der Warngerät-Flasher
+## Flashing without PlatformIO: the Vaura Flasher
 
-Für Nutzer, die **nicht** selbst kompilieren wollen, gibt es eine GUI-App (macOS/Linux/Windows): Gerät per USB-C anschließen, „Neueste Version herunterladen", Port auswählen (das Warngerät wird automatisch markiert und vorausgewählt), „Firmware flashen" — fertig. Alle am Gerät gespeicherten Einstellungen (Spitzname, Tonfrequenz, Anzeige-Abschaltzeit usw.) bleiben dabei erhalten: Die App schreibt das Merged-Binary in zwei Teilen und spart den NVS-Einstellungsbereich (0x9000–0xDFFF) gezielt aus.
+For users who **don't** want to compile it themselves, there's a GUI app (macOS/Linux/Windows): connect the device via USB-C, "Download latest version", select the port (the device is auto-detected and pre-selected), "Flash firmware" — done. All settings stored on the device (nickname, tone frequency, display auto-off, etc.) survive: the app writes the merged binary in two pieces and deliberately skips the NVS settings region (0x9000–0xDFFF).
 
-**Download:** Die fertigen Apps hängen an jedem GitHub-Release: `Warngeraet-Flasher-macos-apple-silicon.zip`, `-macos-intel.zip`, `-linux-x86_64`, `-windows.exe` — plus `warngeraet-firmware.bin` (das Merged-Binary, das die App lädt; auch manuell flashbar: `esptool --chip esp32s3 write_flash 0x0 warngeraet-firmware.bin` — **Achtung:** anders als die App überschreibt das manuelle Voll-Flashen an 0x0 auch den NVS-Bereich, sämtliche Geräte-Einstellungen müssen danach neu gesetzt werden).
+**Download:** The ready-to-run apps are attached to every GitHub release: `Vaura-Flasher-macos-apple-silicon.zip`, `-macos-intel.zip`, `-linux-x86_64`, `-windows.exe` — plus `vaura-firmware.bin` (the merged binary the app loads; also flashable manually: `esptool --chip esp32s3 write_flash 0x0 vaura-firmware.bin` — **careful:** unlike the app, manually flashing the whole thing at 0x0 also overwrites the NVS region, all device settings must be set again afterward).
 
-**Geräte-Einstellungen ohne Flashen:** Der Bereich **„4. Gerät"** in der App verbindet sich mit der seriellen Konsole der laufenden Firmware. „Auslesen" zeigt **Node-ID, Spitzname und Firmware-Version** — der Beleg, dass wirklich das erwartete Gerät am Kabel hängt — und füllt die Felder Name, Kanal, Empfindlichkeit, Ton-Stufe und Anzeige-Abschaltzeit. „Übernehmen" schreibt nur die geänderten Werte und liest den tatsächlichen Gerätestand zurück. Hinweis: Das Verbinden startet das Gerät neu (macOS-Treiberverhalten am USB-Port) — die Kanal-Abfrage erscheint erneut und die Tour-Statistik beginnt bei null.
+**Device settings without flashing:** The **"4. Device"** section in the app connects to the running firmware's serial console. "Read" shows **node ID, nickname, and firmware version** — proof that the expected device is really on the other end of the cable — and fills in the fields for name, channel, sensitivity, tone level, and display auto-off. "Apply" only writes the values that changed and reads back the actual device state. Note: connecting restarts the device (macOS driver behavior on the USB port) — the channel prompt appears again and the tour stats start at zero.
 
-Plattform-Hinweise für Nutzer:
+Platform notes for users:
 
-- **macOS:** App aus dem Zip ziehen; beim ersten Start Rechtsklick → „Öffnen" (unsigniertes Programm, Gatekeeper).
-- **Windows:** SmartScreen-Warnung mit „Weitere Informationen" → „Trotzdem ausführen" bestätigen.
-- **Linux:** ausführbar machen (`chmod +x`) und den Benutzer in die Gruppe `dialout` (Debian/Ubuntu) bzw. `uucp` (Arch) aufnehmen, sonst fehlen die Rechte am seriellen Port.
-- Wird das Gerät nicht erkannt: mit gedrückter **BOOT-Taste (B)** einstecken und erneut flashen.
+- **macOS:** drag the app out of the zip; right-click → "Open" on first launch (unsigned app, Gatekeeper).
+- **Windows:** confirm the SmartScreen warning with "More info" → "Run anyway".
+- **Linux:** make it executable (`chmod +x`) and add the user to the `dialout` group (Debian/Ubuntu) or `uucp` (Arch), otherwise the serial port permissions are missing.
+- If the device isn't detected: plug it in while holding the **BOOT button (B)** and flash again.
 
-### Flasher aus dem Quelltext starten / entwickeln
+### Running / developing the flasher from source
 
 ```bash
-# Einmalig ein Python mit aktuellem Tcl/Tk besorgen. WICHTIG (macOS): NICHT
-# /usr/bin/python3 verwenden -- dessen uraltes Tk 8.5 zeichnet auf aktuellem
-# macOS keine Widgets mehr, die GUI bleibt ein leeres graues Fenster.
-brew install python-tk                             # Homebrew-Python inkl. tkinter/Tk >= 8.6
+# Get a Python with a current Tcl/Tk once. IMPORTANT (macOS): do NOT use
+# /usr/bin/python3 -- its ancient Tk 8.5 no longer draws widgets on current
+# macOS, the GUI stays an empty gray window.
+brew install python-tk                             # Homebrew Python incl. tkinter/Tk >= 8.6
 $(brew --prefix)/bin/python3 -m venv .flasher_venv
 ./.flasher_venv/bin/pip install -r flasher/requirements.txt
-./.flasher_venv/bin/python flasher/flasher.py      # GUI starten
-./.flasher_venv/bin/python flasher/flasher.py --check   # Selbsttest ohne GUI, prueft auch die Tk-Version (auch im CI)
+./.flasher_venv/bin/python flasher/flasher.py      # start the GUI
+./.flasher_venv/bin/python flasher/flasher.py --check   # self-test without GUI, also checks the Tk version (used in CI too)
 ```
 
-Eine eigenständige App (ohne Python-Installation lauffähig) baut PyInstaller — **immer nur für das Betriebssystem, auf dem man gerade sitzt** (PyInstaller kann nicht cross-kompilieren; deshalb baut der Release-Workflow auf vier Runnern):
+A standalone app (runnable without a Python install) is built with PyInstaller — **always only for the OS you're currently on** (PyInstaller can't cross-compile; that's why the release workflow builds on four runners):
 
 ```bash
 ./.flasher_venv/bin/pip install pyinstaller
-# --collect-data esptool ist Pflicht: die Stub-Flasher-JSONs sind Paketdaten,
-# ohne die write_flash zur Laufzeit mit "Flasher stub data is missing" abbricht.
+# --collect-data esptool is required: the stub-flasher JSONs are package data
+# that write_flash needs at runtime, otherwise it fails with "Flasher stub
+# data is missing".
 ./.flasher_venv/bin/pyinstaller --onefile --windowed --collect-data esptool \
-    --name Warngeraet-Flasher \
+    --name Vaura-Flasher \
     --distpath dist --workpath build --specpath build flasher/flasher.py
-# Ergebnis in dist/: unter macOS Warngeraet-Flasher.app (doppelklickbar),
-# unter Linux/Windows ein einzelnes Binary bzw. eine .exe
+# Result in dist/: Vaura-Flasher.app on macOS (double-clickable),
+# a single binary or a .exe on Linux/Windows
 ```
 
-### Release veröffentlichen (Maintainer)
+### Publishing a release (maintainers)
 
-1. **Einmalig:** öffentliches GitHub-Repo anlegen und in `flasher/flasher.py` die Konstante `GITHUB_REPO` vom Platzhalter auf `user/repo` setzen — vorher kann die App nur lokale Dateien flashen.
-2. Tag pushen: `git tag v1.0.0 && git push origin main --tags`.
-3. `.github/workflows/release.yml` baut dann automatisch das Release: Unit-Tests → Firmware → `warngeraet-firmware.bin` (Merged-Binary) + die vier Flasher-Apps als Assets.
+1. **One-time:** create a public GitHub repo and set the `GITHUB_REPO` constant in `flasher/flasher.py` from the placeholder to `user/repo` — before that, the app can only flash local files.
+2. Push a tag: `git tag v1.0.0 && git push origin main --tags`.
+3. `.github/workflows/release.yml` then automatically builds the release: unit tests → firmware → `vaura-firmware.bin` (merged binary) + the four flasher apps as assets.
 
-## Provisionierung (einmalig pro Gerät)
+## Provisioning (once per device)
 
-Die Node-ID wird automatisch aus der Chip-MAC-Adresse abgeleitet — keine Konfiguration nötig. Nur der **Spitzname** muss einmalig gesetzt werden, über die serielle Konsole (`pio device monitor`):
+The node ID is derived automatically from the chip's MAC address — no configuration needed. Only the **nickname** needs to be set once, via the serial console (`pio device monitor`):
 
 ```
 name ROB
 ```
 
-Beliebiges Kürzel, **nur Buchstaben, max. 5 Zeichen** (keine Zahlen — dieselbe Regel wie beim Namen-ändern-Menü am Gerät, siehe unten) — **kein echter Name nötig**. Der Spitzname wird dauerhaft im Flash gespeichert (bleibt nach Neustart/Akku-leer erhalten).
+Any short name, **letters only, max. 5 characters** (no digits — same rule as the on-device rename menu, see below) — **no real name needed**. The nickname is stored permanently in flash (survives restarts/dead batteries).
 
-Die Konsole kann inzwischen **alle** Geräte-Einstellungen (Groß-/Kleinschreibung egal):
+The console can now set **all** device settings (case-insensitive):
 
-| Befehl | Wirkung |
+| Command | Effect |
 |---|---|
-| `help` | Übersicht aller Befehle |
-| `id` | Node-ID anzeigen |
-| `status` | alle Einstellungen maschinenlesbar als `key=value` (Name, ID, Version, Kanal, Empfindlichkeit, Tonstufe, Anzeige) |
-| `name <KÜRZEL>` | Spitznamen setzen |
-| `kanal <0–9>` | Funk-Kanal setzen (wirkt sofort) |
-| `empfindlich <0–10>` | SCHWACH-Empfindlichkeitsstufe setzen |
-| `ton <0–10>` | Piezo-Tonstufe setzen (spielt Testton) |
-| `anzeige <0\|15\|30\|60\|300>` | Display-Abschaltzeit in Sekunden (0 = nie) |
-| `beep [Hz]` | Testton abspielen |
+| `help` | Overview of all commands |
+| `id` | Show node ID |
+| `status` | All settings, machine-readable, as `key=value` (name, ID, version, channel, sensitivity, tone step, display) |
+| `name <NICKNAME>` | Set the nickname |
+| `channel <0–9>` | Set the radio channel (applies immediately) |
+| `sensitivity <0–10>` | Set the falling-back sensitivity level |
+| `tone <0–10>` | Set the piezo tone level (plays a test beep) |
+| `display <0\|15\|30\|60\|300>` | Display auto-off in seconds (0 = never) |
+| `beep [Hz]` | Play a test tone |
 
-Wer keinen `pio device monitor` zur Hand hat: Der **Warngerät-Flasher** hat dafür den Bereich „Gerät" (siehe Flasher-Abschnitt oben) — gleiche Befehle, mit Formularfeldern.
+If you don't have `pio device monitor` handy: the **Vaura Flasher** has the "Device" section for this (see the flasher section above) — same commands, with form fields.
 
-**Piezo-Lautstärke abstimmen:** `beep <Hz>` spielt über dieselbe Konsole einen ~600-ms-Testton bei der angegebenen Frequenz (z. B. `beep 3200`), ohne dass neu geflasht werden muss. Ein Software-Lautstärkeregler existiert bei der aktuellen Ein-Transistor-Schaltung nicht (der Piezo wird nur ein-/ausgeschaltet, keine Zwischenstufen) — die Frequenz ist der einzige Hebel, weil ein Piezo an seiner mechanischen Resonanz am lautesten ist. Die tatsächlich genutzte Frequenz ist **kein** Compile-Zeit-Wert mehr, sondern zur Laufzeit einstellbar und im Flash gespeichert (Standard: 3000 Hz, einstellbarer Bereich 2500–3500 Hz) — entweder direkt am Gerät (siehe „Einstellungen" unten; dort als **Stufe 0–10** auf einer Lineal-Skala dargestellt, Stufe = (Hz − 2500) / 100, Standard 3000 Hz = Stufe 5) oder indem man mit `beep <Hz>` erst einen guten Wert findet und ihn dann am Gerät übernimmt.
+**Tuning piezo volume:** `beep <Hz>` plays a ~600 ms test tone at the given frequency over the same console (e.g. `beep 3200`), without needing to reflash. There's no software volume knob with the current single-transistor drive (the piezo is only switched on/off, no in-between steps) — frequency is the only lever, since a piezo is loudest right at its mechanical resonance. The frequency actually in use is **no longer** a compile-time value — it's runtime-adjustable and stored in flash (default: 3000 Hz, adjustable range 2500–3500 Hz) — either directly on the device (see "Settings" below; shown there as a **level 0–10** on a ruler scale, level = (Hz − 2500) / 100, default 3000 Hz = level 5), or by first finding a good value with `beep <Hz>` and then applying it on the device.
 
-Die 5-Zeichen-Grenze ist kein Rundwert, sondern gerechnet: Die Ruhe-Anzeige listet die Fahrer in bis zu **drei Spalten**, und dort steckt der Status direkt im Namen — `!NAME!` = Signal fällt, `(NAME)` = Abriss. Ein so dekorierter Name belegt 5 + 2 = 7 Zeichen, und drei 7er-Spalten füllen exakt die 21 Zeichen, die bei 128 px Displaybreite und 6 px/Zeichen (`u8g2_font_6x10_tf`) in eine Zeile passen. Ein längerer Name wird beim `name`-Befehl **abgelehnt** (nicht stillschweigend abgeschnitten), mit einer Fehlermeldung, die auf das Limit hinweist. (Ein unter älterer Firmware gespeicherter 6-Zeichen-Name wird beim ersten Boot automatisch auf 5 gekürzt.)
+The 5-character limit isn't a round number, it's calculated: the idle screen lists riders in up to **three columns**, and the status lives directly in the name there — `!NAME!` = signal fading, `(NAME)` = dropped off. A name decorated like this takes 5 + 2 = 7 characters, and three 7-character columns exactly fill the 21 characters that fit on one line at 128 px display width and 6 px/character (`u8g2_font_6x10_tf`). A longer name is **rejected** by the `name` command (not silently truncated), with an error message pointing at the limit. (A 6-character name stored under older firmware is automatically shortened to 5 on the first boot.)
 
-> **Firmware-Update-Hinweis:** Mit dem 5-Zeichen-Limit hat sich das Funk-Paketformat geändert (Protokoll-Version 2). **v2 ist funk-inkompatibel mit v1** — beide Seiten verwerfen die Pakete der jeweils anderen sauber am Versions-Byte. Alle Geräte des Clubs müssen gemeinsam aktualisiert werden.
+> **Firmware update note:** The 5-character limit changed the radio packet format (protocol version 2). **v2 is radio-incompatible with v1** — both sides cleanly reject each other's packets at the version byte. All devices in the club need to be updated together.
 
-## UI-Mockups
+## UI mockups
 
-`docs/ui-mockups.html` (im Browser öffnen) zeigt **jeden** Bildschirmzustand aus `ui.cpp` als Bild: Kanal-Abfrage beim Boot, Ruhe-Anzeige (Allein / 1-, 2- und 3-Spalten-Fahrerliste / stumm + Akku-Hinweis), Sende-Menü, eingehende Warnung, „Noch abgerissen"-Prompt, Einstellungen, Statistik, Ton und Empfindlichkeit (beide mit Lineal-Skala), Anzeige (Display-Abschaltzeit), Kanal, Namen ändern und Reichweiten-Test (normal + Abriss).
+[`docs/ui-mockups.md`](docs/ui-mockups.md) shows **every** screen state from `ui.cpp` as an image: boot channel selection, idle screen (alone / 1-, 2-, and 3-column rider list / muted / battery hint), send menu, incoming warning, "still dropped off" prompt, settings, stats, tone and sensitivity (both with a ruler scale), display (auto-off timeout), channel, changing the name, and range test (normal + dropped off).
 
-## Bedienung (ein Taster)
+## Operation (one button)
 
-**Kanal-Abfrage beim Einschalten:** Direkt nach dem Boot fragt das Gerät zuerst den Funk-Kanal ab (`Kanal waehlen:` mit sichtbarem `Start in Ns`-Countdown), damit man gleich der richtigen Gruppe beitritt. Kurzdruck blättert 0–9 (setzt den Countdown zurück), Langdruck bestätigt; ohne Eingabe bestätigt sich die angezeigte Auswahl nach 10 s selbst — ein unbeaufsichtigter Neustart (z. B. Akku-Aussetzer unterwegs) hängt also nie in der Abfrage. **Bis zur Bestätigung sendet das Gerät keine Heartbeats** und eine eingehende Warnung piept nur, übernimmt aber nicht den Bildschirm; ein Doppelklick bestätigt (statt blind auf einen womöglich falschen Kanal zu warnen). Ein Kanalwechsel leert die Fahrerliste — Fahrer vom alten Kanal wären sonst Minuten später falsche Abrisse.
+**Channel prompt on power-on:** Right after boot, the device first asks for the radio channel (`Select channel:` with a visible `Starting in Ns` countdown), so you join the right group straight away. Short press cycles 0–9 (resets the countdown), long press confirms; with no input, the shown selection confirms itself after 10 s — an unattended restart (e.g. a battery dropout mid-ride) never gets stuck in the prompt. **The device sends no heartbeats until confirmed**, and an incoming warning only beeps without taking over the screen; a double click confirms (instead of blindly warning on a possibly wrong channel). A channel change clears the rider list — riders from the old channel would otherwise become false drop-offs a few minutes later.
 
-**Doppelklick = Sofort-Warnung:** Aus **jedem** Zustand (außer der Kanal-Abfrage, s. o.) — auch bei schlafendem Display, auch mitten in einem Menü — sendet ein Doppelklick sofort die generische Warnung **ACHTUNG!**, ohne Menü und ohne hinzusehen. Bewusst generisch: eine Blind-Geste darf nichts Konkretes behaupten, das falsch sein könnte. (Technische Nebenwirkung: Weil die Firmware nach jedem Klick auf einen möglichen zweiten wartet, reagiert ein Einzelklick minimal verzögert — die Wartezeit ist `BUTTON_CLICK_MS` in `src/config.h`.)
+**Double click = instant warning:** From **any** state (except the channel prompt, see above) — even with the display asleep, even mid-menu — a double click instantly sends the generic **ATTENTION!** warning, without a menu and without looking. Deliberately generic: a blind gesture must never claim something specific that could be wrong. (Side effect: since the firmware waits after every click for a possible second one, a single click reacts with a slight delay — the wait time is `BUTTON_CLICK_MS` in `src/config.h`.)
 
-| Zustand | Kurzdruck | Langdruck |
+| State | Short press | Long press |
 |---|---|---|
-| Kanal wählen (direkt nach dem Boot) | nächster Kanal (0–9), setzt den Countdown zurück | bestätigt den Kanal, Gerät startet den Funkbetrieb |
-| Ruhe-Anzeige | öffnet Sende-Menü | öffnet Einstellungen |
-| Sende-Menü | nächste Warnung durchblättern (4 Warnungen) | markierte Warnung senden |
-| Eingehende Warnung | wegklicken | (keine Funktion) |
-| „Noch abgerissen"-Prompt | Fahrer behalten (nächste Erinnerung in 60 s) | Fahrer aus der Gruppe werfen |
-| Einstellungen | nächster Punkt (Stumm/Statistik/Ton/Anzeige/Empfindlich/Kanal/Name/Test/Zurück) | markierten Punkt öffnen bzw. Stumm umschalten |
-| Statistik | (hält die Anzeige nur wach) | zurück zur Ruhe-Anzeige |
-| Namen ändern | Zeichen durchblättern (nur A–Z) | bestätigen + weiter (leer = Leerzeichen); speichert am Ende |
-| Ton einstellen | nächste Stufe (0–10 auf der Lineal-Skala, +100 Hz mit Wrap), spielt Testton | speichert die Stufe, zurück zur Ruhe-Anzeige |
-| Anzeige einstellen | nächste Abschaltzeit-Stufe (Nie/15 s/30 s/1 min/5 min) | speichert die Stufe, zurück zur Ruhe-Anzeige |
-| Empfindlichkeit einstellen | nächste Stufe (0–10 auf der Lineal-Skala, mit Wrap) | speichert die Stufe, zurück zur Ruhe-Anzeige |
-| Kanal einstellen | nächster Kanal (0–9, mit Wrap) | speichert + schaltet sofort um, zurück zur Ruhe-Anzeige |
-| Reichweiten-Test | nächster Fahrer | beendet den Test |
+| Select channel (right after boot) | next channel (0–9), resets the countdown | confirms the channel, device starts radio operation |
+| Idle screen | opens send menu | opens settings |
+| Send menu | cycle through the next warning (4 warnings) | send the marked warning |
+| Incoming warning | dismiss | (no function) |
+| "Still dropped off" prompt | keep the rider (next reminder in 60 s) | remove the rider from the group |
+| Settings | next item (Mute/Stats/Tone/Display/Sensitivity/Channel/Name/Test/Back) | open the marked item, or toggle Mute |
+| Stats | (just keeps the display awake) | back to idle screen |
+| Change name | cycle through characters (A–Z only) | confirm + advance (empty = space); saves at the end |
+| Set tone | next level (0–10 on the ruler scale, +100 Hz with wrap), plays a test beep | saves the level, back to idle screen |
+| Set display | next auto-off level (Never/15 s/30 s/1 min/5 min) | saves the level, back to idle screen |
+| Set sensitivity | next level (0–10 on the ruler scale, with wrap) | saves the level, back to idle screen |
+| Set channel | next channel (0–9, with wrap) | saves + switches immediately, back to idle screen |
+| Range test | next rider | ends the test |
 
-- Sende-Menü ohne Aktivität → nach 6 s zurück zur Ruhe-Anzeige (verhindert Fehlsendungen).
-- Eingehende Warnung wird nach 15 s automatisch ausgeblendet, falls nicht vorher weggeklickt.
-- Es gibt kein Bestätigen (ACK) — eine eingehende Warnung wird nur lokal angezeigt und per Kurzdruck weggeklickt, ohne dass etwas zurückgesendet wird.
-- **Senden kann fehlschlagen** (Duty-Cycle-Budget erschöpft oder Funkmodul beim Boot nicht gefunden): dann zeigt das Display `! NICHT gesendet` und es piept 1× kurz — man glaubt also nie fälschlich, gewarnt zu haben. Die ohnehin geplante Wiederholungskopie (400 ms später) wirkt dabei als automatischer Retry und korrigiert den Toast, wenn sie durchkommt.
-- Der Piezo-Beeper hat pro Ereignis ein eigenes, am Klang unterscheidbares Muster (unabhängig vom Display-Sleep-Zustand hörbar):
-  - **Eingehende Warnung** von jemand anderem → 2× kurz.
-  - **SCHWACH** (Fahrer fällt zurück) → 3× kurz.
-  - **ABRISS** (Fahrer komplett weg) → 1× lang (~1 s).
-  - **ABRISS-Erinnerung**: solange ein Fahrer abgerissen bleibt, alle 60 s 1× kurz (der lange Ton geht im Fahrtwind leicht unter). Ab der **zweiten** Erinnerung wird der Ruhe-Screen zum Prompt `Noch abgerissen: (NAME)` — **Langdruck wirft den Fahrer aus der Gruppe** (zählt nicht mehr, erscheint nicht mehr, erinnert nicht mehr), Kurzdruck oder 15 s Timeout behält ihn. Ein rausgeworfener Fahrer kommt **automatisch zurück**, sobald sein Heartbeat wieder eintrifft (reguläres `ZURUECK`). Offene Menüs/Warnungen werden vom Prompt nie unterbrochen.
-  - Beim **eigenen** Senden einer Warnung piept es bewusst **nicht**: da sieht/spürt man Toast und Display ohnehin schon selbst. (Einzige Ausnahme: der Fehlschlag-Beep, siehe oben.)
-  - **Eigener Akku schwach** (< 3,5 V) → 1× kurz + `!`-Präfix vor der eigenen Akku-Prozentzahl in der Kopfzeile (einmal pro Low-Episode, mit 100-mV-Hysterese gegen Flattern).
-- Fällt der **Akku eines Mitfahrers** unter dieselbe Schwelle, erscheint `<Name> AKKU` in der Ereigniszeile (ohne Beep/Wecken — sein Gerät geht sonst irgendwann „kommentarlos" aus und sieht für alle wie ein Abriss aus). Die Spannung kommt aus dessen Heartbeat.
-- Geräte **ohne INA219** zeigen keine Akku-Prozentzahl an (statt irreführender `0%`).
-- Keine Status-LED verbaut/angesteuert — im geschlossenen Case ohnehin nicht sichtbar, der Piezo-Beeper übernimmt die "auch ohne Blick aufs Display wahrnehmbar"-Rolle.
+- Send menu with no activity → back to the idle screen after 6 s (prevents accidental sends).
+- An incoming warning is automatically hidden after 15 s if not dismissed sooner.
+- There's no acknowledgement (ACK) — an incoming warning is only shown locally and dismissed with a short press, nothing is sent back.
+- **Sending can fail** (duty-cycle budget exhausted, or the radio module wasn't found at boot): the display then shows `! NOT sent` and beeps once, briefly — so you never falsely believe you've warned someone. The repeat copy that's sent anyway (400 ms later) acts as an automatic retry here and corrects the toast if it gets through.
+- The piezo beeper has its own, distinctly recognizable pattern per event (audible regardless of display sleep state):
+  - **Incoming warning** from someone else → 2× short.
+  - **Falling back** (a rider is falling behind) → 3× short.
+  - **Dropped off** (a rider is completely gone) → 1× long (~1 s).
+  - **Drop-off reminder**: while a rider stays dropped off, 1× short every 60 s (the long tone can get lost in the wind). From the **second** reminder on, the idle screen becomes the prompt `Still dropped off: (NAME)` — **long press removes the rider from the group** (no longer counted, shown, or reminded), short press or a 15 s timeout keeps them. A removed rider comes back **automatically** as soon as their heartbeat arrives again (a regular `BACK` event). Open menus/warnings are never interrupted by the prompt.
+  - Sending your **own** warning deliberately does **not** beep: you already see the toast/display yourself right then. (The only exception is the failure beep, see above.)
+  - **Your own battery low** (< 3.5 V) → 1× short + a `!` prefix before your own battery percentage in the header (once per low episode, with 100 mV hysteresis against flapping).
+- If a **fellow rider's battery** drops below the same threshold, `<Name> BATTERY` appears in the event line (no beep/wake — their device would otherwise eventually go dark "without comment" and look like a drop-off to everyone). The voltage comes from their heartbeat.
+- Devices **without an INA219** show no battery percentage (instead of a misleading `0%`).
+- No status LED fitted/driven — not visible in the closed case anyway; the piezo beeper takes on the "perceivable without looking at the display" role.
 
-### Display-Sleep (Stromsparen)
+### Display sleep (power saving)
 
-Das OLED schaltet sich nach einer einstellbaren Zeit ohne Ereignis automatisch ab — Standard 30 s (`OLED_WAKE_MS` in `src/config.h`), am Gerät änderbar unter **Einstellungen → Anzeige** (Stufen: Nie/15 s/30 s/1 min/5 min, im Flash gespeichert; „Nie" = dauerhaft an, kostet spürbar Akku). Das Gerät läuft dabei weiter im Hintergrund (Heartbeats, Roster, Duty-Cycle-Budget — alles unabhängig vom Display). Es wacht wieder auf bei:
-- jedem Tasterdruck,
-- einer eingehenden Warnung,
-- einem SCHWACH- oder ABRISS-Ereignis eines Fahrers.
+The OLED automatically turns off after an adjustable period of inactivity — default 30 s (`OLED_WAKE_MS` in `src/config.h`), changeable on the device under **Settings → Display** (levels: Never/15 s/30 s/1 min/5 min, stored in flash; "Never" = stays on permanently, costs noticeably more battery). The device keeps running in the background meanwhile (heartbeats, roster, duty-cycle budget — all independent of the display). It wakes up again on:
+- every button press,
+- an incoming warning,
+- a falling-back or dropped-off event of a rider.
 
-**Wichtig:** Ist das Display gerade aus, schaltet der **erste** Tasterdruck (kurz oder lang) es nur ein, löst aber **keine Aktion** aus — man bekommt also nie blind eine Warnung raus oder öffnet blind die Einstellungen. Erst der nächste Druck bedient das Menü normal.
+**Important:** if the display is currently off, the **first** button press (short or long) only wakes it, but triggers **no action** — so you never blindly send a warning or blindly open settings. Only the next press operates the menu normally.
 
-### Ruhe-Anzeige: wer ist da, wer fällt zurück?
+### Idle screen: who's here, who's falling back?
 
-Die Ruhe-Anzeige listet die Fahrer direkt auf, **schwächstes Signal zuoberst** — die Fahrer, um die es diesem Gerät geht, stehen also immer sichtbar oben. Der Status steckt im Namen selbst: `(NAME)` = Abriss — eingeklammert wie ein Abwesender, sortiert immer ganz nach oben; `!NAME!` = fällt gerade zurück (dasselbe Kriterium wie der SCHWACH-Piep, Ausrufezeichen als aktive Warnung), ` NAME` = alles gut. Rechts in der Kopfzeile stehen `aktiv/gesamt` **inklusive dir selbst** (zwei Fahrer unterwegs = `2/2`) und der eigene Akkustand. Auf dem Zweifarb-Panel leuchtet die Kopfzeile gelb (obere 16 Pixelzeilen); die Fahrerliste beginnt bewusst genau unterhalb dieser Farbgrenze.
+The idle screen lists the riders directly, **weakest signal first** — the riders this device exists for are always visible at the top. The status lives in the name itself: `(NAME)` = dropped off — parenthesized like an absentee, always sorted to the very top; `!NAME!` = currently falling back (the same criterion as the falling-back beep, exclamation marks as an active warning), ` NAME` = all good. The header shows `active/total` **including yourself** (two riders out together = `2/2`) and your own battery level. On the two-tone panel, the header glows yellow (top 16 pixel rows); the rider list deliberately starts right below that color boundary.
 
-Das Layout passt sich der Gruppengröße an:
+The layout adapts to the group size:
 
-- **bis 4 Fahrer** — eine Zeile pro Fahrer, zusätzlich mit dem geglätteten RSSI (dBm; `---` bei Abriss) und dem Akkustand aus dessen Heartbeat (`--` ohne dortigen INA219; bei Abriss bleibt der letzte bekannte Wert stehen — er verrät, ob das Gerät schlicht leergelaufen ist):
+- **up to 4 riders** — one row per rider, plus the smoothed RSSI (dBm; `---` when dropped off) and the battery level from their heartbeat (`--` without an INA219 there; when dropped off, the last known value stays — it reveals whether the device simply ran out of battery):
   ```
   (MAX)     ---  15%
   !LEA!    -108  62%
    ROB      -71   --
   ```
-- **5–8 Fahrer** — zwei Namensspalten (ohne RSSI-/Akku-Zahlen).
-- **ab 9 Fahrern** — drei Spalten in einer kleineren Schrift (5×7), bis zu 15 Namen.
+- **5–8 riders** — two name columns (no RSSI/battery numbers).
+- **9+ riders** — three columns in a smaller font (5×7), up to 15 names.
 
-Ein per „Noch abgerissen"-Prompt **aus der Gruppe geworfener** Fahrer verschwindet aus Liste und Zähler, bis sein Heartbeat wieder eintrifft.
+A rider **removed from the group** via the "still dropped off" prompt disappears from the list and the counter until their heartbeat arrives again.
 
-Passen nicht alle aufs Display, werden **nur die schwächsten** gezeigt — wer stark empfangen wird, braucht keinen Platz. Der RSSI-Detailblick pro Fahrer bleibt über den Reichweiten-Test (Einstellungen → Test) verfügbar.
+If not everyone fits on the display, **only the weakest are shown** — a strong signal doesn't need the space. The per-rider RSSI detail view remains available via the range test (Settings → Test).
 
-### Einstellungen: Stumm, Statistik, Ton, Anzeige, Empfindlich, Kanal, Name, Test (am Gerät)
+### Settings: Mute, Stats, Tone, Display, Sensitivity, Channel, Name, Test (on the device)
 
-Langdruck aus der Ruhe-Anzeige öffnet die Einstellungen — nützlich unterwegs, ohne PlatformIO/Kabel. Genau wie beim Sende-Menü: **Kurzdruck** blättert durch die Punkte (**Stumm → Statistik → Ton → Anzeige → Empfindlich → Kanal → Name → Test → Zurück → ...**, beliebig oft), **Langdruck** öffnet bzw. schaltet den gerade angezeigten Punkt:
+Long press from the idle screen opens settings — handy on the road, without PlatformIO/a cable. Just like the send menu: **short press** cycles through the items (**Mute → Stats → Tone → Display → Sensitivity → Channel → Name → Test → Back → ...**, as many times as you like), **long press** opens or toggles the currently shown item:
 
-- **Stumm** → schaltet alle Alarm-Beeps um (Langdruck wechselt AN/AUS, man bleibt im Menü) — für Pause/Café. Solange aktiv, zeigt die Ruhe-Anzeige mittig `STUMM` in der Kopfzeile. **Bewusst nicht dauerhaft gespeichert:** nach einem Neustart ist das Gerät immer laut, damit es nie unbemerkt stumm in die nächste Ausfahrt geht. Die Testtöne im Ton-Menü bleiben absichtlich hörbar.
-- **Statistik** → Übersicht über die laufende Tour: Fahrzeit seit dem Einschalten, gesendete und empfangene Warnungen, Abrisse. Bewusst nicht gespeichert — jede Tour beginnt bei null.
-- **Ton** → Frequenz des Piezo-Beepers, dargestellt als **Stufe 0–10 auf einer Lineal-Skala** (Stufe = (Hz − 2500) / 100): Kurzdruck eine Stufe weiter (spielt jeweils einen 500-ms-Testton), am oberen Ende zurück auf Stufe 0. Langdruck speichert dauerhaft im Flash.
-- **Anzeige** → Abschaltzeit des Displays: Kurzdruck blättert durch **Nie/15 s/30 s/1 min/5 min**, Langdruck speichert dauerhaft im Flash (siehe „Display-Sleep" oben).
-- **Empfindlich** → Empfindlichkeit der SCHWACH-Frühwarnung, gleiche **Lineal-Skala 0–10** (Standard: Stufe 5 in der Mitte). Jede Stufe verschiebt die Warnschwelle um 3 dB:
+- **Mute** → toggles all alert beeps (long press switches ON/OFF, you stay in the menu) — for a break/café stop. While active, the idle screen shows `MUTE` centered in the header. **Deliberately not persisted:** after a restart the device is always loud, so it never rides silently into the next outing unnoticed. The test tones in the tone menu deliberately stay audible.
+- **Stats** → overview of the current tour: ride time since power-on, warnings sent and received, drop-offs. Deliberately not saved — every tour starts at zero.
+- **Tone** → piezo beeper frequency, shown as a **level 0–10 on a ruler scale** (level = (Hz − 2500) / 100): short press advances one level (plays a 500 ms test tone each time), wraps back to level 0 at the top end. Long press saves permanently to flash.
+- **Display** → display auto-off timeout: short press cycles through **Never/15 s/30 s/1 min/5 min**, long press saves permanently to flash (see "Display sleep" above).
+- **Sensitivity** → sensitivity of the falling-back early warning, same **ruler scale 0–10** (default: level 5 in the middle). Each level shifts the warning threshold by 3 dB:
 
-  | Stufe | Schwelle | Bedeutung |
+  | Level | Threshold | Meaning |
   |---|---|---|
-  | 0 | −120 dBm | unter der Empfangsgrenze → praktisch aus (Abriss-Erkennung bleibt aktiv) |
-  | 5 | −105 dBm | Standard (bisheriges Festverhalten) |
-  | 10 | −90 dBm | sehr früh — warnt schon bei leichtem Zurückfallen |
+  | 0 | −120 dBm | below the reception limit → practically off (drop-off detection stays active) |
+  | 5 | −105 dBm | default (previous fixed behavior) |
+  | 10 | −90 dBm | very early — warns even at a slight falling back |
 
-  Die zweite Bedingung (nachhaltiger Abfall ≥ 6 dB unter die eigene Baseline) bleibt auf allen Stufen gleich — die Stufe bestimmt nur, **ab welcher Signalstärke** gewarnt wird. Zum Kalibrieren im Feld: Reichweiten-Test (unten) zeigt live den Wert, den diese Logik beurteilt.
-- **Kanal** → Funk-Kanal 0–9 der Gruppe (derselbe, den auch die Kanal-Abfrage beim Boot einstellt). **Alle Geräte einer Ausfahrt müssen denselben Kanal haben** — verschiedene Kanäle hören sich gegenseitig überhaupt nicht (ein Kanal-Versehen sieht aus, als wären alle abgerissen). Langdruck speichert, schaltet sofort um und leert die Fahrerliste (Fahrer vom alten Kanal wären sonst falsche Abrisse). Standard: Kanal 0. Nützlich, wenn zwei Gruppen gleichzeitig unterwegs sind.
-- **Name** → wie im übernächsten Abschnitt beschrieben.
-- **Test** → Reichweiten-Test, siehe nächster Abschnitt.
-- **Zurück** → verlässt die Einstellungen sofort, ohne etwas zu ändern.
-- Ohne Tastendruck für 6 s geht es automatisch zurück zur Ruhe-Anzeige (in Ton/Empfindlich/Kanal ohne zu speichern — genau wie beim Namen ändern, siehe unten).
-- Alternativ über die serielle Konsole testen (`beep <Hz>`, siehe "Piezo-Lautstärke abstimmen" oben) — praktisch, um vorab einen guten Wert zu finden, bevor man ihn am Gerät fest einstellt.
+  The second condition (a sustained drop of ≥6 dB below your own baseline) stays the same across all levels — the level only determines **at what signal strength** a warning fires. To calibrate in the field: the range test (below) shows live the value this logic judges.
+- **Channel** → radio channel 0–9 of the group (the same one the boot-time channel prompt sets). **All devices on a ride must be on the same channel** — different channels can't hear each other at all (a channel mistake looks exactly like everyone dropping off). Long press saves, switches immediately, and clears the rider list (riders on the old channel would otherwise become false drop-offs). Default: channel 0. Useful when two groups are riding at the same time.
+- **Name** → as described two sections below.
+- **Test** → range test, see the next section.
+- **Back** → leaves settings immediately, without changing anything.
+- With no button press for 6 s it automatically goes back to the idle screen (in Tone/Sensitivity/Channel without saving — just like changing the name, see below).
+- Alternatively, test via the serial console (`beep <Hz>`, see "Tuning piezo volume" above) — handy for finding a good value beforehand, before dialing it in permanently on the device.
 
-### Reichweiten-Test (Feldtest-Werkzeug)
+### Range test (field test tool)
 
-Einstellungen → **Test** zeigt für einen Fahrer live: groß den geglätteten RSSI (der Wert, den die SCHWACH-Logik beurteilt), darunter den Roh-RSSI des letzten Heartbeats und dessen Alter. Kurzdruck wechselt den beobachteten Fahrer, Langdruck beendet. **Kein Timeout, kein Display-Sleep** in diesem Modus — ein Reichweiten-Spaziergang dauert Minuten, und man hat den Modus ja ausdrücklich gestartet. Genau das Werkzeug, um die geschätzten ~400–600 m Reichweite und die `RSSI_FALLING_BACK_*`-Schwellen im Feld zu verifizieren (siehe [Verifikation](#verifikation)).
+Settings → **Test** shows for one rider, live: large, the smoothed RSSI (the value the falling-back logic judges), below it the raw RSSI of the last heartbeat and its age. Short press switches the observed rider, long press exits. **No timeout, no display sleep** in this mode — a range walk takes minutes of glancing, and you explicitly started the mode. The exact tool for verifying the estimated ~400–600 m range and the `RSSI_FALLING_BACK_*` thresholds in the field (see [Verification](#verification)).
 
-### Namen am Gerät ändern (ohne Laptop)
+### Changing the name on the device (no laptop needed)
 
-Sobald in den Einstellungen "Name" mit Langdruck bestätigt wurde, wird der Name zeichenweise eingegeben:
+Once "Name" is confirmed with a long press in settings, the name is entered character by character:
 
-- Start: alle 5 Positionen sind leer, die Eingabe beginnt bei Position 1.
-- **Kurzdruck** blättert das markierte Zeichen ausschließlich durch `A`–`Z` — **keine Zahlen, kein Leerzeichen** in dieser Rotation.
-- **Langdruck** bestätigt das aktuelle Zeichen (egal ob durchgeblättert oder noch unverändert leer) und springt zur nächsten Position — die dabei **immer leer startet**. Ein Leerzeichen entsteht also gezielt dadurch, dass man an einer Position long-presst, ohne vorher zu klicken.
-- Für einen **kürzeren Namen** (z. B. "ROB"): einfach nach dem letzten gewünschten Zeichen zweimal in Folge long-pressen, ohne dazwischen zu klicken — zwei leere Positionen in Folge werden als "fertig" erkannt, der Name wird sofort (rechts getrimmt) gespeichert.
-- Werden alle 5 Positionen bestätigt, wird ebenfalls automatisch gespeichert.
-- Immer wenn der nächste Langdruck speichern würde (zweites Leerzeichen in Folge, oder die 5. Position ist erreicht), zeigt die Fußzeile statt `kurz=Zeichen lang=OK` den Hinweis **`lang=fertig`** an.
-- Ohne Tastendruck für 6 s wird die Bearbeitung **verworfen** (nichts wird gespeichert) und es geht zurück zur Ruhe-Anzeige.
-- Das 5-Zeichen-Limit ist dasselbe wie beim `name`-Befehl über die serielle Konsole (siehe Provisionierung oben) — hier kann es aber gar nicht überschritten werden, weil nur 5 Positionen zum Durchblättern angezeigt werden.
+- Start: all 5 positions are empty, entry starts at position 1.
+- **Short press** cycles the marked character exclusively through `A`–`Z` — **no digits, no space** in this rotation.
+- **Long press** confirms the current character (whether cycled or still untouched and empty) and jumps to the next position — which **always starts empty**. A space is thus created deliberately by long-pressing at a position without clicking first.
+- For a **shorter name** (e.g. "ROB"): simply long-press twice in a row after the last desired character, without clicking in between — two empty positions in a row are recognized as "done", the name is saved immediately (right-trimmed).
+- If all 5 positions are confirmed, it also saves automatically.
+- Whenever the next long press would save (a second space in a row, or the 5th position is reached), the footer switches from `short=char long=OK` to the unambiguous hint **`long=done`**.
+- With no button press for 6 s, the edit is **discarded** (nothing is saved) and it goes back to the idle screen.
+- The 5-character limit is the same as for the `name` command over the serial console (see Provisioning above) — but here it can't even be exceeded, since only 5 positions are shown to cycle through.
 
-## Wie die Abriss-Erkennung funktioniert
+## How drop-off detection works
 
-Jedes Gerät sendet alle ~2 s (leicht zufällig verschoben) einen Heartbeat mit Spitzname + Akkuspannung. Jeder Empfänger führt daraus pro Fahrer **zwei** geglättete Signalstärke-Mittel (RSSI-EMAs): ein schnelles („wo das Signal gerade ist") und ein träges als Baseline („wo es normalerweise liegt", Zeitkonstante ~40 s):
+Every device sends a heartbeat with nickname + battery voltage roughly every ~2 s (slightly randomized). Every receiver derives **two** smoothed signal-strength averages (RSSI EMAs) per rider from this: a fast one ("where the signal is right now") and a slow one as a baseline ("where it usually sits", time constant ~40 s):
 
-- **"Fällt zurück"**: das schnelle Mittel ist unter die **einstellbare Schwelle** gefallen (Einstellungen → Empfindlich, Stufe 0–10 in 3-dB-Schritten von −120 bis −90 dBm; Standard Stufe 5 = −105 dBm) **und** liegt ≥6 dB unter der trägen Baseline → Frühwarnung auf der Ruhe-Anzeige. Der Vergleich gegen die Baseline (statt gegen den unmittelbar vorherigen Heartbeat) erkennt auch **allmähliches** Zurückfallen — mit nur einer EMA hätte der Roh-RSSI innerhalb eines einzigen Heartbeat-Intervalls um ~17 dB einbrechen müssen.
-- **"Abriss"**: ~5,8 s lang gar kein Signal mehr → klarer Alarm samt Zeitstempel. Die Schwelle (`DROPPED_OFF_TIMEOUT_MS`) budgetiert bewusst 2 volle Intervalle **inklusive Sende-Jitter** plus Marge — ein einzelner verlorener Heartbeat (z. B. weil sich zwei Halbduplex-Sender überlappt haben) löst so keinen Fehlalarm aus, erst zwei fehlende in Folge.
+- **"Falling back"**: the fast average has dropped below the **adjustable threshold** (Settings → Sensitivity, level 0–10 in 3 dB steps from −120 to −90 dBm; default level 5 = −105 dBm) **and** is ≥6 dB below the slow baseline → early warning on the idle screen. Comparing against the baseline (instead of the immediately preceding heartbeat) also catches **gradual** falling back — with only one EMA, the raw RSSI would have had to collapse by ~17 dB within a single heartbeat interval.
+- **"Dropped off"**: no signal at all for ~5.8 s → a clear alert with a timestamp. The threshold (`DROPPED_OFF_TIMEOUT_MS`) deliberately budgets 2 full intervals **including send jitter** plus margin — a single lost heartbeat (e.g. because two half-duplex senders overlapped) doesn't trigger a false alarm this way; it takes two missing in a row.
 
-Beides ist automatisch, ohne Tastendruck. Schwellwerte stehen als Konstanten in `src/config.h` (`RSSI_FALLING_BACK_*`, `RSSI_EMA_ALPHA_*`, `DROPPED_OFF_MISSED_INTERVALS`/`DROPPED_OFF_TIMEOUT_MS`) und lassen sich nach ersten Feldtests nachjustieren.
+Both are automatic, no button press needed. Thresholds live as constants in `src/config.h` (`RSSI_FALLING_BACK_*`, `RSSI_EMA_ALPHA_*`, `DROPPED_OFF_MISSED_INTERVALS`/`DROPPED_OFF_TIMEOUT_MS`) and can be re-tuned after initial field tests.
 
-## Funkprotokoll (Kurzreferenz)
+## Radio protocol (quick reference)
 
-EU868, 868,3 MHz, **GFSK** (nicht LoRa) bei 19,2 kb/s, ~10 kHz Frequenzhub, 46,9 kHz RX-Bandbreite, Gaussian-Shaping (BT=0,5), eigenes Syncword (kein LoRaWAN). Der **Gruppen-Kanal** (Einstellungen → Kanal, 0–9) verschiebt das zweite Syncword-Byte — Geräte auf verschiedenen Kanälen sind füreinander unsichtbar; alle senden aber weiterhin auf derselben Frequenz und teilen sich die Luft. Der Duty-Cycle wird in Software als rollierendes 1-Stunden-Budget mitgeführt (`src/radio.cpp`) — Sendungen werden zurückgehalten, falls das gesetzlich erlaubte 1 %-Budget erschöpft ist.
+EU868, 868.3 MHz, **GFSK** (not LoRa) at 19.2 kb/s, ~10 kHz frequency deviation, 46.9 kHz RX bandwidth, Gaussian shaping (BT=0.5), a private sync word (not LoRaWAN). The **group channel** (Settings → Channel, 0–9) shifts the second sync-word byte — devices on different channels are invisible to each other; all still transmit on the same frequency and share the airtime. The duty cycle is tracked in software as a rolling 1-hour budget (`src/radio.cpp`) — transmissions are held back once the legally allowed 1% budget is exhausted.
 
-**Warum GFSK statt LoRa:** Für eine Ausfahrt reichen ein paar hundert Meter Reichweite — LoRas Kernvorteil (mehrere Kilometer) wird hier nicht gebraucht. GFSK hat bei 19,2 kb/s eine deutlich kürzere Time-on-Air pro Paket (~9 ms statt ~82 ms bei LoRa SF8), wodurch der Heartbeat im selben gesetzlichen 1 %-Budget viel öfter gesendet werden kann (~2 s statt ~15 s) — das ist der Hebel, der die Abriss-/Lücken-Erkennung schneller macht. Geschätzte Reichweite bei dieser Bitrate: ~400–600 m (Empfindlichkeit ~−111 dBm vs. ~−127 dBm bei LoRa SF8) — im Feld verifizieren, bevor man sich darauf verlässt. Warnungen laufen mit im selben GFSK-Modus (ein SX1262 kann nicht gleichzeitig LoRa und GFSK empfangen).
+**Why GFSK instead of LoRa:** A group ride only needs a few hundred meters of range — LoRa's core advantage (several kilometers) isn't needed here. At 19.2 kb/s, GFSK has a much shorter time-on-air per packet (~9 ms instead of ~82 ms for LoRa SF8), which lets the heartbeat run much more often within the same legal 1% duty-cycle budget (~2 s instead of ~15 s) — that's the lever that makes drop-off/gap detection faster. Estimated range at this bitrate: ~400–600 m (sensitivity ~−111 dBm vs. ~−127 dBm for LoRa SF8) — verify in the field before relying on it. Warnings run in the same GFSK mode (an SX1262 can't receive LoRa and GFSK at the same time).
 
-**Hinweis zur Duty-Cycle-Berechnung:** RadioLibs `getTimeOnAir()` zählt bei FSK nur die reinen Payload-Bits, nicht Preamble/Syncword/Längen-Byte/CRC. `Radio::fullFrameTimeOnAirUs()` in `src/radio.cpp` rechnet das vollständige Frame selbst nach, damit das 1 %-Budget den tatsächlichen Sendezustand widerspiegelt.
+**Note on duty-cycle calculation:** RadioLib's `getTimeOnAir()` only counts the raw payload bits for FSK, not preamble/sync word/length byte/CRC. `Radio::fullFrameTimeOnAirUs()` in `src/radio.cpp` computes the full frame itself so the 1% budget reflects the actual transmit state.
 
-## Verifikation
+## Verification
 
-Mit **mindestens 2 Geräten**:
+With **at least 2 devices**:
 
-1. `pio run -t upload` auf beide (alle Geräte zusammen — v2 ist funk-inkompatibel mit v1, s. o.), dann je einmal Spitznamen setzen (Konsole, oder bequemer: Flasher → „Gerät").
-2. Beide einschalten → die **Kanal-Abfrage** erscheint mit Countdown; Langdruck (oder 10 s warten) bestätigt Kanal 0. Die Ereigniszeile zeigt danach kurz die Firmware-Version (`FW v0.1.x`), und nach wenigen Sekunden erscheint der jeweils andere Fahrer in der Liste (mit RSSI) samt `2/2` in der Kopfzeile (der Zähler schließt das eigene Gerät ein).
-3. Kurzdruck → durchblättern → Langdruck auf "AUTO HINTEN" → das andere Gerät zeigt die Warnung + piept 2× kurz. Kurzdruck dort blendet sie wieder aus.
-4. **Doppelklick** an einem Gerät (auch bei schlafendem Display) → das andere zeigt sofort `ACHTUNG!`.
-5. Geräte ≥ 30 min nebeneinander liegen lassen → **keine** spontanen `ABRISS`/`ZURUECK`-Ereignisse in der Ereigniszeile (genau das war der Fehlalarm-Bug der 4-s-Schwelle ohne Jitter-Marge).
-6. Ein Gerät ausschalten / weit weggehen → nach ~6 s erscheint beim anderen `<Name> ABRISS` in der letzten-Ereignis-Zeile (und das Display wacht dafür automatisch auf, falls es gerade schlief); bei allmählicher Entfernung vorher `<Name> SCHWACH`. In der Liste rückt der Fahrer als `(NAME)` nach ganz oben.
-7. **Stumm** (Einstellungen) aktivieren → eingehende Warnung erscheint ohne Beep, Kopfzeile zeigt `STUMM`. Danach wieder ausschalten.
-8. **ABRISS-Erinnerung**: ein Gerät ausgeschaltet lassen → nach ~60 s 1 kurzer Erinnerungs-Piep, nach ~120 s der Prompt `Noch abgerissen: (NAME)` → Langdruck entfernt den Fahrer (verschwindet aus Liste und Zähler, keine weiteren Erinnerungen). Gerät wieder einschalten → Fahrer kommt automatisch mit `ZURUECK` zurück.
-9. **Kanal-Test**: ein Gerät auf Kanal 1 stellen (Einstellungen → Kanal) → die Geräte verlieren sich (ABRISS nach ~6 s); zurück auf 0 → `ZURUECK`.
-10. **Empfindlichkeit**: auf Stufe 10 stellen und ein Gerät in den Nebenraum legen → `SCHWACH` kommt deutlich früher als bei Stufe 5; auf Stufe 0 kommt gar kein SCHWACH mehr, nur der ABRISS.
-11. **Statistik** (Einstellungen) → Fahrzeit läuft, Warn-/Abriss-Zähler passen zu den vorherigen Testschritten.
-12. Erst wenn die Schritte am Tisch funktionieren, im Feld (echte Ausfahrt) testen — dafür gibt es jetzt den **Reichweiten-Test** (Einstellungen → Test): die tatsächliche GFSK-Reichweite über die im Peloton relevanten Distanzen live ablesen (die ~400–600 m sind eine Schätzung aus dem Datenblatt, kein Feldmesswert) und Heartbeat-Intervall/RSSI-Schwellen bei Bedarf feinjustieren.
+1. `pio run -t upload` on both (all devices together — v2 is radio-incompatible with v1, see above), then set nicknames once each (console, or more conveniently: Flasher → "Device").
+2. Power on both → the **channel prompt** appears with a countdown; long press (or wait 10 s) confirms channel 0. The event line then briefly shows the firmware version (`FW v0.1.x`), and after a few seconds the respective other rider appears in the list (with RSSI), along with `2/2` in the header (the counter includes your own device).
+3. Short press → cycle through → long press on "CAR BEHIND" → the other device shows the warning + beeps 2× short. Short press there dismisses it again.
+4. **Double click** on one device (even with the display asleep) → the other immediately shows `ATTENTION!`.
+5. Leave the devices next to each other for ≥ 30 minutes → **no** spontaneous `DROPPED`/`BACK` events in the event line (that was exactly the false-alarm bug from the 4 s threshold without a jitter margin).
+6. Turn one device off / move it far away → after ~6 s, the other shows `<Name> DROPPED` in the last-event line (and the display wakes automatically for it, if it was asleep); with gradual distance, `<Name> WEAK` shows first. In the list, the rider moves to the top as `(NAME)`.
+7. Enable **Mute** (Settings) → an incoming warning appears without a beep, the header shows `MUTE`. Turn it off again afterward.
+8. **Drop-off reminder**: leave one device off → after ~60 s, 1 short reminder beep; after ~120 s, the prompt `Still dropped off: (NAME)` → long press removes the rider (disappears from the list and counter, no more reminders). Turn the device back on → the rider comes back automatically with `BACK`.
+9. **Channel test**: set one device to channel 1 (Settings → Channel) → the devices lose each other (`DROPPED` after ~6 s); back to 0 → `BACK`.
+10. **Sensitivity**: set it to level 10 and put one device in another room → `WEAK` comes noticeably earlier than at level 5; at level 0, `WEAK` no longer occurs at all, only the drop-off.
+11. **Stats** (Settings) → ride time is running, warning/drop-off counters match the previous test steps.
+12. Only once these steps work on the table, test in the field (a real ride) — that's what the **range test** (Settings → Test) is for: read the actual GFSK range live over the distances relevant in a group ride (the ~400–600 m is a datasheet estimate, not a field measurement), and fine-tune the heartbeat interval/RSSI thresholds as needed.
 
-## Offene Punkte für später
+## Open items for later
 
-- 868-MHz-Antenne vor dem ersten Sendetest verifizieren.
-- Optional: AES-Verschlüsselung der Pakete (aktuell aus, Format in `src/protocol.h` vorbereitet für eine spätere Erweiterung).
-- Ausbaustufe 2: dedizierte Taster pro Warnung (STL-Anpassung) + Vibrationsmotor (Piezo-Beeper ist bereits umgesetzt), damit Alarme auch ohne Blick aufs Display wahrnehmbar sind; ggf. GPS für echte Distanzangaben, SOS-Funktion, Sturzerkennung.
+- Verify the 868 MHz antenna before the first transmit test.
+- Optional: AES encryption of packets (currently off, format in `src/protocol.h` prepared for a later extension).
+- Expansion stage 2: dedicated buttons per warning (case model change) + a vibration motor (the piezo beeper is already implemented), so alerts are perceivable without looking at the display; possibly GPS for real distance readings, an SOS function, fall detection.
