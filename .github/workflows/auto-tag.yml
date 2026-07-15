@@ -4,6 +4,11 @@
 # -> patch). Pushing the new tag triggers release.yml, which builds and
 # publishes the actual firmware + flasher release -- this workflow only
 # decides *whether* and *what* to release.
+#
+# The tag push below is authenticated with the RELEASE_PAT secret rather than
+# the default GITHUB_TOKEN: GitHub never lets a GITHUB_TOKEN-authored push
+# trigger another workflow (anti-recursion guard), so a tag pushed that way
+# would silently never kick off release.yml's "on: push: tags" trigger.
 name: Auto Tag
 
 on:
@@ -20,6 +25,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
 
       - name: Determine and push the next version tag
         run: |
