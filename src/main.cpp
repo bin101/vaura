@@ -122,7 +122,11 @@ void loop() {
   // Signed difference instead of `now >= deadline`: stays correct across the
   // ~49-day millis() wraparound (same idiom for every deadline in ui.cpp).
   if (static_cast<int32_t>(now - nextHeartbeatMs) >= 0) {
-    sendHeartbeat();
+    // No heartbeat while the boot-time channel selection is open -- the
+    // device must not announce itself to a group it may be about to leave.
+    if (!Ui::bootChannelPending()) {
+      sendHeartbeat();
+    }
     nextHeartbeatMs = now + randomizedHeartbeatInterval();
   }
 

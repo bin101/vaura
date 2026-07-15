@@ -17,7 +17,7 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C display(U8G2_R0, /*reset=*/U8X8_PIN_NONE);
 // SettingsMenu: entered from Idle via long-press. Short press cycles through
 // Name/Ton/Zurueck (like the warning-send Menu below); long press commits to
 // whichever is currently shown.
-enum class State { Idle, Menu, IncomingWarning, Rename, SettingsMenu, ToneMenu, DisplayMenu, SensitivityMenu, ChannelMenu, StatsScreen, RangeTest, DismissPrompt };
+enum class State { BootChannelSelect, Idle, Menu, IncomingWarning, Rename, SettingsMenu, ToneMenu, DisplayMenu, SensitivityMenu, ChannelMenu, StatsScreen, RangeTest, DismissPrompt };
 State state = State::Idle;
 uint32_t stateEnteredMs = 0;
 
@@ -272,6 +272,23 @@ void enterChannelMenu() {
   state = State::ChannelMenu;
   stateEnteredMs = millis();
   channelMenuValue = DeviceConfig::channel();
+}
+
+// Applies a changed channel and forgets everything heard on the old one --
+// peers rostered on the previous channel would otherwise linger and "reissen
+// ab" minutes after the switch. Shared by the boot selection and the
+// settings menu.
+void commitChannel(uint8_t newChannel) {
+  if (newChannel != DeviceConfig::channel()) {
+    DeviceConfig::setChannel(newChannel);
+    Radio::applyChannel(newChannel);
+    Roster::begin();
+  }
+}
+
+void confirmBootChannel() {
+  commitChannel(channelMenuValue);
+  enterIdle();
 }
 
 void enterStatsScreen() {
@@ -703,6 +720,27 @@ void renderStatsScreen() {
   display.drawStr(0, 61, "lang=zurueck");
 }
 
+void renderBootChannelSelect() {
+  display.setFont(u8g2_font_6x10_tf);
+  display.drawStr(0, 9, "Kanal waehlen:");
+  display.drawHLine(0, 12, 128);
+
+  display.setFont(u8g2_font_9x15B_tf);
+  char chStr[12];
+  snprintf(chStr, sizeof(chStr), "Kanal %u", channelMenuValue);
+  display.drawStr(0, 34, chStr);
+
+  display.setFont(u8g2_font_6x10_tf);
+  uint32_t elapsed = millis() - stateEnteredMs;
+  uint32_t remainingS = elapsed >= BOOT_CHANNEL_SELECT_TIMEOUT_MS
+                            ? 0
+                            : (BOOT_CHANNEL_SELECT_TIMEOUT_MS - elapsed + 999) / 1000;
+  char detail[24];
+  snprintf(detail, sizeof(detail), "Start in %lus ...", static_cast<unsigned long>(remainingS));
+  display.drawStr(0, 46, detail);
+  display.drawStr(0, 61, "kurz=aendern lang=OK");
+}
+
 void renderChannelMenu() {
   display.setFont(u8g2_font_6x10_tf);
   display.drawStr(0, 9, "Funk-Kanal:");
@@ -754,6 +792,9 @@ void renderDisplayMenu() {
 void render() {
   display.clearBuffer();
   switch (state) {
+    case State::BootChannelSelect:
+      renderBootChannelSelect();
+      break;
     case State::Idle:
       renderIdle();
       break;
@@ -809,13 +850,19 @@ void setBatteryStatusForDisplay(uint8_t percent, bool available, bool low) {
   batteryLowForDisplay = low;
 }
 
+bool bootChannelPending() { return state == State::BootChannelSelect; }
+
 void begin() {
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   display.begin();
-  enterIdle();
+  // Boot starts on the channel selection, not on Idle -- confirming (or the
+  // 10 s auto-confirm) is what releases the first heartbeat, see main.cpp.
+  state = State::BootChannelSelect;
+  stateEnteredMs = millis();
+  channelMenuValue = DeviceConfig::channel();
   // The firmware version doubles as the very first "event": visible on the
-  // idle screen right after boot ("which version is your device on?"), then
-  // naturally displaced by real events.
+  // idle screen right after the channel is confirmed ("which version is your
+  // device on?"), then naturally displaced by real events.
   showToast("FW " FIRMWARE_VERSION);
   wakeDisplay(); // boot always shows the startup screen for the first window
   render();
@@ -839,6 +886,14 @@ void tick() {
 
   bool needsRender = false;
 
+  if (state == State::BootChannelSelect && now - stateEnteredMs > BOOT_CHANNEL_SELECT_TIMEOUT_MS) {
+    // Unattended reboot (battery brownout mid-ride): auto-confirm whatever is
+    // shown -- untouched, that is the persisted channel. The countdown resets
+    // with every click, so a touched-but-abandoned selection had 10 s on
+    // screen with "Start in Ns" before it wins.
+    confirmBootChannel();
+    needsRender = true;
+  }
   if (state == State::Menu && now - stateEnteredMs > UI_MENU_TIMEOUT_MS) {
     enterIdle();
     needsRender = true;
@@ -953,6 +1008,10 @@ void onButtonClick() {
   wakeDisplay();
 
   switch (state) {
+    case State::BootChannelSelect:
+      channelMenuValue = (channelMenuValue + 1) % (GROUP_CHANNEL_MAX + 1);
+      stateEnteredMs = millis(); // resets the auto-start countdown
+      break;
     case State::Idle:
       enterMenu();
       break;
@@ -1016,6 +1075,9 @@ void onButtonLongPress() {
   wakeDisplay();
 
   switch (state) {
+    case State::BootChannelSelect:
+      confirmBootChannel();
+      break;
     case State::Idle:
       enterSettingsMenu();
       break;
@@ -1095,8 +1157,7 @@ void onButtonLongPress() {
       enterIdle();
       break;
     case State::ChannelMenu:
-      DeviceConfig::setChannel(channelMenuValue);
-      Radio::applyChannel(channelMenuValue); // effective immediately, not just after reboot
+      commitChannel(channelMenuValue); // effective immediately, not just after reboot
       enterIdle();
       break;
     case State::StatsScreen:
@@ -1107,6 +1168,14 @@ void onButtonLongPress() {
 }
 
 void onButtonDoubleClick() {
+  if (state == State::BootChannelSelect) {
+    // Booting is never the emergency moment -- treat this as a confirm
+    // instead of firing an ACHTUNG onto a possibly-wrong group.
+    wakeDisplay();
+    confirmBootChannel();
+    render();
+    return;
+  }
   // No display-asleep swallow here, unlike click/long-press: this is the
   // "warn NOW, eyes stay on the road" path, and sending a generic ACHTUNG
   // blind is exactly its purpose. Whatever menu/edit was open is abandoned --
@@ -1118,6 +1187,12 @@ void onButtonDoubleClick() {
 }
 
 void onIncomingWarning(const char *senderNickname, Protocol::WarningType type) {
+  if (state == State::BootChannelSelect) {
+    // The channel is not confirmed yet -- audible nudge, but don't let the
+    // warning screen hijack (and thereby skip) the selection.
+    beepPattern(WARNING_BEEP_COUNT, BEEP_DURATION_MS);
+    return;
+  }
   wakeDisplay(); // an incoming warning must be visible even if the display was asleep
   state = State::IncomingWarning;
   stateEnteredMs = millis();

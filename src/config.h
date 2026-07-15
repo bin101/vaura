@@ -208,6 +208,13 @@ static_assert((BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_S
 #define UI_INCOMING_DISPLAY_MS 15000UL
 #define UI_RENAME_TIMEOUT_MS 6000UL // resets on every click/hold, so slow typing is fine
 
+// After boot the device first asks which group channel to join (short press
+// cycles 0..9, long press confirms) so nobody rides off announcing themselves
+// to the wrong group. Unattended reboots (battery brownout mid-ride!) must
+// never hang there: with no input for this long, the currently shown channel
+// is confirmed automatically. Heartbeats are held back until confirmation.
+#define BOOT_CHANNEL_SELECT_TIMEOUT_MS 10000UL
+
 // How long the OLED stays on after being woken (button press, incoming warning,
 // or a SCHWACH/ABRISS roster event), before going back to sleep to save power.
 // Default only -- the actual timeout is user-adjustable at runtime (settings

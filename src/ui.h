@@ -11,6 +11,11 @@ namespace Ui {
 
 void begin();
 
+// True while the boot-time channel selection is still open. main.cpp holds
+// back heartbeats until the rider confirmed (or the timeout auto-confirmed)
+// the channel, so the device never announces itself to the wrong group.
+bool bootChannelPending();
+
 // Main.cpp calls this once per loop (before tick()) with the latest reading
 // from the power module, so the idle screen can show it. `available` is false
 // when no INA219 answered at boot (then no percentage is drawn at all instead
