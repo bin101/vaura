@@ -89,8 +89,11 @@ jobs:
       # --collect-data esptool: the stub-flasher JSONs are package data that
       # PyInstaller doesn't collect automatically -- without them write_flash
       # fails at runtime with "Flasher stub data is missing".
+      # --collect-data certifi: same story for its cacert.pem CA bundle --
+      # without it, the frozen app's download fails with
+      # CERTIFICATE_VERIFY_FAILED.
       - name: Build app
-        run: pyinstaller --onefile --windowed --collect-data esptool --name Vaura-Flasher flasher/flasher.py
+        run: pyinstaller --onefile --windowed --collect-data esptool --collect-data certifi --name Vaura-Flasher flasher/flasher.py
 
       - name: Package per OS
         shell: bash
