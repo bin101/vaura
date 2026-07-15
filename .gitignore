@@ -1,0 +1,12 @@
+.pio/
+.pio_venv/
+.flasher_venv/
+.vscode/
+.DS_Store
+*.mhtml
+__pycache__/
+# PyInstaller-Ausgabe (lokal gebaute Flasher-App)
+dist/
+build/
+# lokal erzeugtes Merged-Binary (fuer Flasher-Tests; im Release ein Asset)
+warngeraet-firmware.bin
