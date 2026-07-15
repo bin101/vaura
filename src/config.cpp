@@ -3,6 +3,7 @@
 #include <Preferences.h>
 
 #include "protocol.h"
+#include "radio.h" // Kanal-Aenderungen der Konsole wirken sofort (applyChannel)
 
 namespace DeviceConfig {
 
@@ -40,8 +41,30 @@ void printHelp() {
   Serial.println(F("---- Warngeraet Konsole ----"));
   Serial.println(F("name <bis 5 Buchstaben>  Spitznamen setzen, z.B.: name ROB"));
   Serial.println(F("id                       Node-ID anzeigen"));
+  Serial.println(F("status                   Alle Einstellungen als key=value ausgeben"));
+  Serial.println(F("kanal <0-9>              Funk-Kanal setzen (wirkt sofort)"));
+  Serial.println(F("empfindlich <0-10>       SCHWACH-Empfindlichkeitsstufe setzen"));
+  Serial.println(F("ton <0-10>               Piezo-Tonstufe setzen (spielt Testton)"));
+  Serial.println(F("anzeige <0|15|30|60|300> Display-Abschaltzeit in Sekunden (0 = nie)"));
   Serial.println(F("beep [Hz]                Testton abspielen, z.B.: beep 3200 (ohne Hz: aktuell eingestellte Frequenz)"));
   Serial.println(F("help                     Diese Hilfe anzeigen"));
+}
+
+// Strictly numeric argument after `prefixLen` chars, or -1. toInt() alone is
+// not enough -- it silently returns 0 for garbage, which is a valid value for
+// several of the setters below.
+long parseNumericArg(const String &line, unsigned int prefixLen) {
+  String arg = line.substring(prefixLen);
+  arg.trim();
+  if (arg.length() == 0) {
+    return -1;
+  }
+  for (size_t i = 0; i < arg.length(); i++) {
+    if (!isDigit(arg[i])) {
+      return -1;
+    }
+  }
+  return arg.toInt();
 }
 
 void handleLine(const String &lineIn) {
@@ -75,6 +98,62 @@ void handleLine(const String &lineIn) {
     } else {
       setNickname(name.c_str());
       Serial.printf("Gespeichert. Spitzname ist jetzt: %s\n", nickname());
+    }
+  } else if (lower.equals("status")) {
+    // Machine-readable key=value lines -- parsed by the Warngeraet-Flasher's
+    // settings panel. Keys are part of that interface: keep them stable.
+    Serial.printf("name=%s\n", nicknameBuf);
+    Serial.printf("id=%04X\n", cachedNodeId);
+    Serial.printf("version=%s\n", FIRMWARE_VERSION);
+    Serial.printf("kanal=%u\n", cachedChannel);
+    Serial.printf("empfindlich=%u\n", cachedFallingBackSensitivity);
+    Serial.printf("ton=%u\n",
+                  (cachedBeepFrequencyHz - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_STEP_HZ);
+    Serial.printf("anzeige=%lu\n", static_cast<unsigned long>(cachedDisplayTimeoutMs / 1000UL));
+  } else if (lower.startsWith("kanal ")) {
+    long ch = parseNumericArg(line, 6);
+    if (ch < 0 || ch > GROUP_CHANNEL_MAX) {
+      Serial.printf("Fehler: Kanal 0-%d erwartet.\n", GROUP_CHANNEL_MAX);
+    } else {
+      setChannel(static_cast<uint8_t>(ch));
+      Radio::applyChannel(static_cast<uint8_t>(ch));
+      Serial.printf("OK kanal=%ld\n", ch);
+    }
+  } else if (lower.startsWith("empfindlich ")) {
+    long level = parseNumericArg(line, 12);
+    if (level < 0 || level > FALLING_BACK_SENSITIVITY_MAX) {
+      Serial.printf("Fehler: Stufe 0-%d erwartet.\n", FALLING_BACK_SENSITIVITY_MAX);
+    } else {
+      setFallingBackSensitivity(static_cast<uint8_t>(level));
+      Serial.printf("OK empfindlich=%ld (Floor %d dBm)\n", level,
+                    fallingBackFloorDbm(static_cast<uint8_t>(level)));
+    }
+  } else if (lower.startsWith("ton ")) {
+    long level = parseNumericArg(line, 4);
+    constexpr long kMaxToneLevel = (BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_STEP_HZ;
+    if (level < 0 || level > kMaxToneLevel) {
+      Serial.printf("Fehler: Stufe 0-%ld erwartet.\n", kMaxToneLevel);
+    } else {
+      uint16_t hz = BEEP_FREQUENCY_MIN_HZ + static_cast<uint16_t>(level) * BEEP_FREQUENCY_STEP_HZ;
+      setBeepFrequencyHz(hz);
+      tone(PIN_PIEZO, hz, 600);
+      Serial.printf("OK ton=%ld (%u Hz)\n", level, hz);
+    }
+  } else if (lower.startsWith("anzeige ")) {
+    long seconds = parseNumericArg(line, 8);
+    uint32_t ms = seconds < 0 ? 1 : static_cast<uint32_t>(seconds) * 1000UL;
+    bool knownStep = false;
+    for (uint32_t step : OLED_TIMEOUT_STEPS_MS) {
+      if (ms == step) {
+        knownStep = true;
+        break;
+      }
+    }
+    if (!knownStep) {
+      Serial.println(F("Fehler: 0, 15, 30, 60 oder 300 Sekunden erwartet (0 = nie)."));
+    } else {
+      setDisplayTimeoutMs(ms);
+      Serial.printf("OK anzeige=%ld\n", seconds);
     }
   } else if (lower.equals("beep") || lower.startsWith("beep ")) {
     String arg = line.length() > 4 ? line.substring(4) : "";
