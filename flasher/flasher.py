@@ -17,6 +17,7 @@ import re
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -48,6 +49,104 @@ NVS_END = 0xE000
 # Aeltere Tk-Versionen (macOS-System-Python bringt 8.5.9 von 2010 mit) zeichnen
 # auf aktuellem macOS keine Widgets mehr -- nur ein leeres graues Fenster.
 MIN_TK_VERSION = 8.6
+
+# Serielle Konsole der laufenden Firmware (Einstellungen auslesen/setzen).
+DEVICE_BAUD = 115200
+# Schluessel der `status`-Ausgabe (config.cpp) -- Teil der Schnittstelle.
+SETTINGS_KEYS = ("name", "id", "version", "kanal", "empfindlich", "ton", "anzeige")
+
+
+def open_device_serial(port):
+    """Oeffnet den Konsolen-Port des Geraets. DTR/RTS bleiben unten, weil der
+    USB-Serial/JTAG des ESP32-S3 deren Wechsel als Reset-Kommando wertet --
+    zumindest der macOS-CDC-Treiber toggelt beim Oeffnen/Schliessen aber
+    trotzdem (empirisch: rst:0x15 USB_UART_CHIP_RESET), das Geraet startet
+    also neu. Aufrufer muessen deshalb wait_for_device_boot() abwarten."""
+    import serial
+
+    ser = serial.Serial()
+    ser.port = port
+    ser.baudrate = DEVICE_BAUD
+    ser.timeout = 0.2
+    ser.dtr = False
+    ser.rts = False
+    ser.open()
+    return ser
+
+
+def wait_for_device_boot(ser, max_s=4.0, settle_s=0.6):
+    """Wartet nach dem Oeffnen, bis ein etwaiger Boot durch ist: Kommt binnen
+    1 s gar nichts, lief das Geraet einfach weiter; kommen Boot-Zeilen, gilt
+    settle_s Stille nach der letzten Zeile als "Konsole bereit"."""
+    start = time.time()
+    last_data = 0.0
+    while time.time() - start < max_s:
+        if ser.readline():
+            last_data = time.time()
+            continue
+        if last_data == 0.0:
+            if time.time() - start > 1.0:
+                return
+        elif time.time() - last_data > settle_s:
+            return
+
+
+def send_console_command(ser, command, wait_s=1.5):
+    """Sendet eine Konsolenzeile und sammelt die Antwortzeilen ein. Bricht
+    frueher ab, sobald nach den ersten Antwortzeilen kurz Stille herrscht."""
+    ser.reset_input_buffer()
+    ser.write((command + "\n").encode("ascii", errors="replace"))
+    ser.flush()
+    lines = []
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        raw = ser.readline()
+        if raw:
+            line = raw.decode(errors="replace").strip()
+            if line:
+                lines.append(line)
+        elif lines:
+            break
+    return lines
+
+
+def parse_status_lines(lines):
+    """key=value-Zeilen der `status`-Antwort -> Dict; fremde Logzeilen (Radio-
+    Meldungen etc.) fallen einfach durchs Raster."""
+    settings = {}
+    for line in lines:
+        if "=" in line:
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key in SETTINGS_KEYS:
+                settings[key] = value.strip()
+    return settings
+
+
+def read_device_settings(port):
+    """Liest die Identitaet + Einstellungen des angeschlossenen Geraets."""
+    ser = open_device_serial(port)
+    try:
+        wait_for_device_boot(ser)
+        return parse_status_lines(send_console_command(ser, "status", wait_s=2.0))
+    finally:
+        ser.close()
+
+
+def apply_device_settings(port, commands, log_cb):
+    """Sendet Setz-Kommandos und liest danach den neuen Status zurueck --
+    die Rueckmeldung an die GUI ist immer der tatsaechliche Geraetestand."""
+    ser = open_device_serial(port)
+    try:
+        wait_for_device_boot(ser)
+        for command in commands:
+            log_cb(f"> {command}")
+            for line in send_console_command(ser, command):
+                if line.startswith(("OK", "Fehler", "Gespeichert")):
+                    log_cb(f"  {line}")
+        return parse_status_lines(send_console_command(ser, "status", wait_s=2.0))
+    finally:
+        ser.close()
 
 
 def list_serial_ports():
@@ -241,7 +340,8 @@ class FlasherApp:
         self.msg_queue = queue.Queue()
 
         root.title(APP_TITLE)
-        root.minsize(560, 460)
+        root.minsize(560, 640)
+        self.device_settings = None  # zuletzt ausgelesener Geraetestand (dict)
 
         main = ttk.Frame(root, padding=14)
         main.pack(fill="both", expand=True)
@@ -267,12 +367,51 @@ class FlasherApp:
 
         # --- Flashen ---
         fl = ttk.LabelFrame(main, text="3. Flashen", padding=10)
-        fl.pack(fill="both", expand=True, pady=(10, 0))
+        fl.pack(fill="x", pady=(10, 0))
         self.btn_flash = ttk.Button(fl, text="Firmware flashen", command=self.on_flash)
         self.btn_flash.pack(anchor="w")
         self.progress = ttk.Progressbar(fl, maximum=100)
-        self.progress.pack(fill="x", pady=(8, 6))
-        self.txt_log = tk.Text(fl, height=12, state="disabled", wrap="word",
+        self.progress.pack(fill="x", pady=(8, 0))
+
+        # --- Geraete-Einstellungen (ueber die serielle Konsole der Firmware) ---
+        dv = ttk.LabelFrame(main, text="4. Gerät: Einstellungen (über USB, ohne Flashen)", padding=10)
+        dv.pack(fill="x", pady=(10, 0))
+        top = ttk.Frame(dv)
+        top.pack(fill="x")
+        self.btn_read = ttk.Button(top, text="Auslesen", command=self.on_read_device)
+        self.btn_read.pack(side="left")
+        # Identitaets-Zeile: Node-ID + Name + Firmware -- der Beleg, dass am
+        # anderen Ende wirklich das erwartete Warngeraet haengt.
+        self.lbl_device = ttk.Label(top, text="nicht verbunden")
+        self.lbl_device.pack(side="left", padx=(12, 0))
+
+        form = ttk.Frame(dv)
+        form.pack(fill="x", pady=(8, 0))
+        self.var_name = tk.StringVar()
+        self.var_kanal = tk.StringVar()
+        self.var_empf = tk.StringVar()
+        self.var_ton = tk.StringVar()
+        self.var_anzeige = tk.StringVar()
+        fields = [
+            ("Name (max 5)", ttk.Entry(form, textvariable=self.var_name, width=8)),
+            ("Kanal", ttk.Spinbox(form, from_=0, to=9, textvariable=self.var_kanal, width=4, wrap=True)),
+            ("Empfindlich", ttk.Spinbox(form, from_=0, to=10, textvariable=self.var_empf, width=4, wrap=True)),
+            ("Ton-Stufe", ttk.Spinbox(form, from_=0, to=10, textvariable=self.var_ton, width=4, wrap=True)),
+            ("Anzeige aus (s)", ttk.Combobox(form, textvariable=self.var_anzeige, state="readonly",
+                                             width=8, values=("0 (nie)", "15", "30", "60", "300"))),
+        ]
+        self.device_widgets = []
+        for column, (label, widget) in enumerate(fields):
+            ttk.Label(form, text=label).grid(row=0, column=column, sticky="w", padx=(0, 10))
+            widget.grid(row=1, column=column, sticky="w", padx=(0, 10))
+            self.device_widgets.append(widget)
+        self.btn_apply = ttk.Button(dv, text="Übernehmen", command=self.on_apply_device)
+        self.btn_apply.pack(anchor="w", pady=(10, 0))
+
+        # --- Log ---
+        lg = ttk.LabelFrame(main, text="Protokoll", padding=10)
+        lg.pack(fill="both", expand=True, pady=(10, 0))
+        self.txt_log = tk.Text(lg, height=10, state="disabled", wrap="word",
                                font=("Courier", 11) if sys.platform == "darwin" else ("TkFixedFont", 9))
         self.txt_log.pack(fill="both", expand=True)
 
@@ -318,6 +457,17 @@ class FlasherApp:
                 elif kind == "firmware":
                     self.firmware_path, text = payload
                     self.lbl_firmware.configure(text=text)
+                elif kind == "device":
+                    self.device_settings = payload
+                    self.lbl_device.configure(text=(
+                        f"Node-ID {payload.get('id', '?')}  ·  {payload.get('name', '?')}"
+                        f"  ·  FW {payload.get('version', '?')}"))
+                    self.var_name.set(payload.get("name", ""))
+                    self.var_kanal.set(payload.get("kanal", "0"))
+                    self.var_empf.set(payload.get("empfindlich", "5"))
+                    self.var_ton.set(payload.get("ton", "5"))
+                    anzeige = payload.get("anzeige", "30")
+                    self.var_anzeige.set("0 (nie)" if anzeige == "0" else anzeige)
                 elif kind == "done":
                     self.busy = False
                     self.update_buttons()
@@ -331,6 +481,10 @@ class FlasherApp:
         self.btn_local.configure(state=state)
         can_flash = not self.busy and self.firmware_path and self.port_var.get()
         self.btn_flash.configure(state="normal" if can_flash else "disabled")
+        can_read = not self.busy and bool(self.port_var.get())
+        self.btn_read.configure(state="normal" if can_read else "disabled")
+        can_apply = can_read and self.device_settings is not None
+        self.btn_apply.configure(state="normal" if can_apply else "disabled")
 
     def refresh_ports(self):
         ports = list_serial_ports()
@@ -378,6 +532,74 @@ class FlasherApp:
                 self.log("Download abgeschlossen.")
             except Exception as e:  # noqa: BLE001
                 self.log(f"Download fehlgeschlagen: {e}")
+            finally:
+                self.msg_queue.put(("done", None))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_read_device(self):
+        port = self.selected_port()
+        if not port:
+            return
+        self.busy = True
+        self.update_buttons()
+
+        def worker():
+            try:
+                settings = read_device_settings(port)
+                if "id" not in settings:
+                    self.log("Keine Antwort vom Geraet. Laeuft eine Firmware mit "
+                             "'status'-Befehl (ab v0.1.0+) und ist der richtige Port gewaehlt?")
+                else:
+                    self.msg_queue.put(("device", settings))
+                    self.log(f"Verbunden: Node-ID {settings.get('id', '?')}  "
+                             f"Name {settings.get('name', '?')}  FW {settings.get('version', '?')}")
+                    self.log("Hinweis: Das Verbinden startet das Geraet neu "
+                             "(Kanal-Abfrage laeuft, Tour-Statistik beginnt bei null).")
+            except Exception as e:  # noqa: BLE001
+                self.log(f"Auslesen fehlgeschlagen: {e}")
+            finally:
+                self.msg_queue.put(("done", None))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_apply_device(self):
+        port = self.selected_port()
+        if not port or self.device_settings is None:
+            return
+        current = self.device_settings
+        commands = []
+        name = self.var_name.get().strip()
+        if name and name != current.get("name"):
+            if len(name) > 5 or not name.isalpha():
+                self.log("Fehler: Name = max. 5 Buchstaben, keine Zahlen/Sonderzeichen.")
+                return
+            commands.append(f"name {name}")
+        for key, var in (("kanal", self.var_kanal), ("empfindlich", self.var_empf),
+                         ("ton", self.var_ton)):
+            value = var.get().strip()
+            if value and value != current.get(key):
+                commands.append(f"{key} {value}")
+        anzeige = self.var_anzeige.get().split(" ")[0].strip()  # "0 (nie)" -> "0"
+        if anzeige and anzeige != current.get("anzeige"):
+            commands.append(f"anzeige {anzeige}")
+        if not commands:
+            self.log("Keine Aenderungen.")
+            return
+
+        self.busy = True
+        self.update_buttons()
+
+        def worker():
+            try:
+                settings = apply_device_settings(port, commands, self.log)
+                if "id" in settings:
+                    self.msg_queue.put(("device", settings))
+                    self.log("Einstellungen uebernommen (Anzeige = neuer Geraetestand).")
+                else:
+                    self.log("Geraet hat nach dem Schreiben nicht geantwortet -- bitte erneut auslesen.")
+            except Exception as e:  # noqa: BLE001
+                self.log(f"Uebernehmen fehlgeschlagen: {e}")
             finally:
                 self.msg_queue.put(("done", None))
 
