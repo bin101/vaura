@@ -1,11 +1,11 @@
-# Release-Pipeline: laeuft bei jedem Git-Tag "v*" (z. B. v1.0.0).
+# Release pipeline: runs on every "v*" git tag (e.g. v1.0.0).
 #
-# Erzeugt ein GitHub-Release mit:
-#   - warngeraet-firmware.bin       Merged-Binary (Bootloader + Partitionstabelle
-#                                   + boot_app0 + App), flashbar an Offset 0x0 --
-#                                   genau das laedt der Warngeraet-Flasher
-#   - Warngeraet-Flasher-*          fertige GUI-Apps (PyInstaller) fuer
-#                                   macOS (Apple Silicon + Intel), Linux, Windows
+# Produces a GitHub release with:
+#   - vaura-firmware.bin       Merged binary (bootloader + partition table +
+#                              boot_app0 + app), flashable as-is at offset
+#                              0x0 -- exactly what the Vaura Flasher loads
+#   - Vaura-Flasher-*          ready-to-run GUI apps (PyInstaller) for
+#                              macOS (Apple Silicon + Intel), Linux, Windows
 name: Release
 
 on:
@@ -45,7 +45,7 @@ jobs:
       - name: Create merged binary
         run: |
           B=.pio/build/seeed_xiao_esp32s3
-          python -m esptool --chip esp32s3 merge_bin -o warngeraet-firmware.bin \
+          python -m esptool --chip esp32s3 merge_bin -o vaura-firmware.bin \
             0x0 "$B/bootloader.bin" \
             0x8000 "$B/partitions.bin" \
             0xe000 "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
@@ -54,7 +54,7 @@ jobs:
       - name: Attach firmware to release
         uses: softprops/action-gh-release@v2
         with:
-          files: warngeraet-firmware.bin
+          files: vaura-firmware.bin
           generate_release_notes: true
 
   flasher:
@@ -64,7 +64,7 @@ jobs:
         include:
           - os: macos-latest # Apple Silicon
             suffix: macos-apple-silicon
-          - os: macos-13 # letzter Intel-Runner
+          - os: macos-13 # last Intel runner
             suffix: macos-intel
           - os: ubuntu-latest
             suffix: linux-x86_64
@@ -84,29 +84,29 @@ jobs:
       - name: Smoke test (imports + port scan, no GUI)
         run: python flasher/flasher.py --check
 
-      # --collect-data esptool: die Stub-Flasher-JSONs sind Paketdaten, die
-      # PyInstaller nicht automatisch einsammelt -- ohne sie bricht
-      # write_flash zur Laufzeit mit "Flasher stub data is missing" ab.
+      # --collect-data esptool: the stub-flasher JSONs are package data that
+      # PyInstaller doesn't collect automatically -- without them write_flash
+      # fails at runtime with "Flasher stub data is missing".
       - name: Build app
-        run: pyinstaller --onefile --windowed --collect-data esptool --name Warngeraet-Flasher flasher/flasher.py
+        run: pyinstaller --onefile --windowed --collect-data esptool --name Vaura-Flasher flasher/flasher.py
 
       - name: Package per OS
         shell: bash
         run: |
           case "${{ matrix.suffix }}" in
             macos-*)
-              # --windowed erzeugt auf macOS ein .app-Bundle; als Zip anhaengen
-              (cd dist && zip -qr "../Warngeraet-Flasher-${{ matrix.suffix }}.zip" Warngeraet-Flasher.app)
+              # --windowed produces a .app bundle on macOS; zip it up for the release
+              (cd dist && zip -qr "../Vaura-Flasher-${{ matrix.suffix }}.zip" Vaura-Flasher.app)
               ;;
             windows)
-              cp dist/Warngeraet-Flasher.exe "Warngeraet-Flasher-${{ matrix.suffix }}.exe"
+              cp dist/Vaura-Flasher.exe "Vaura-Flasher-${{ matrix.suffix }}.exe"
               ;;
             *)
-              cp dist/Warngeraet-Flasher "Warngeraet-Flasher-${{ matrix.suffix }}"
+              cp dist/Vaura-Flasher "Vaura-Flasher-${{ matrix.suffix }}"
               ;;
           esac
 
       - name: Attach app to release
         uses: softprops/action-gh-release@v2
         with:
-          files: Warngeraet-Flasher-${{ matrix.suffix }}*
+          files: Vaura-Flasher-${{ matrix.suffix }}*

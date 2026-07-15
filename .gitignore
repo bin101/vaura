@@ -5,8 +5,8 @@
 .DS_Store
 *.mhtml
 __pycache__/
-# PyInstaller-Ausgabe (lokal gebaute Flasher-App)
+# PyInstaller output (locally built flasher app)
 dist/
 build/
-# lokal erzeugtes Merged-Binary (fuer Flasher-Tests; im Release ein Asset)
-warngeraet-firmware.bin
+# locally generated merged binary (for flasher tests; a release asset otherwise)
+vaura-firmware.bin
