@@ -22,7 +22,7 @@ bool begin() {
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   sensorAvailable = ina219.begin(&Wire);
   if (!sensorAvailable) {
-    Serial.println("Power: INA219 nicht gefunden -- Akkuanzeige deaktiviert.");
+    Serial.println("Power: INA219 not found -- battery display disabled.");
   }
   return sensorAvailable;
 }

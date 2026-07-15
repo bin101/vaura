@@ -15,7 +15,7 @@ struct Peer {
   // Explicit flag, not "lastSeenMs == 0": millis() legitimately passes 0 once
   // every ~49.7 days, and a heartbeat stamped in exactly that millisecond
   // would otherwise make the peer look brand-new on its next heartbeat
-  // (spurious DA event + EMA reset mid-episode).
+  // (spurious "joined" event + EMA reset mid-episode).
   bool everSeen = false;
   uint32_t lastSeenMs = 0;
   // Two RSSI EMAs: fast = "where the signal is right now", slow = the
@@ -25,8 +25,8 @@ struct Peer {
   float rssiEmaSlow = 0;
   int16_t lastRawRssi = 0;
   uint16_t batteryMillivolts = 0; // from the peer's heartbeat; 0 = no INA219 there
-  // Latched once the peer's battery dipped below BATTERY_LOW_MV, so "AKKU" is
-  // logged exactly once per low episode (cleared above BATTERY_LOW_CLEAR_MV).
+  // Latched once the peer's battery dipped below BATTERY_LOW_MV, so "battery"
+  // is logged exactly once per low episode (cleared above BATTERY_LOW_CLEAR_MV).
   bool batteryLowNotified = false;
   // Set once a second heartbeat has been folded into the EMAs, so the very
   // first reading after a peer appears isn't compared against itself.
@@ -44,11 +44,12 @@ Peer peers[MAX_PEERS];
 char lastEventBuf[24] = {0};
 uint32_t lastEventMs = 0;
 
-// Separate from lastEventMs: only SCHWACH/ABRISS bump this one, not DA/ZURUECK.
-// The UI uses it to wake the (otherwise sleeping) display specifically for the
-// two events that are actually worth interrupting the rider for.
+// Separate from lastEventMs: only "falling back"/"dropped off" bump this one,
+// not "joined"/"back". The UI uses it to wake the (otherwise sleeping)
+// display specifically for the two events that are actually worth
+// interrupting the rider for.
 uint32_t lastAlertMs = 0;
-uint32_t alertGeneration = 0; // one increment per SCHWACH/ABRISS, never reset
+uint32_t alertGeneration = 0; // one increment per "falling back"/"dropped off", never reset
 AlertType lastAlertType_ = AlertType::FallingBack; // arbitrary until lastAlertMs != 0
 
 char nicknameFallbackBuf[8];
@@ -125,28 +126,28 @@ void onHeartbeat(uint16_t nodeId, const char *nickname, uint16_t batteryMillivol
   peer->batteryMillivolts = batteryMillivolts;
 
   // A peer running out of juice is worth a note on the idle screen (their
-  // device going dark looks exactly like an Abriss to everyone). Not an
+  // device going dark looks exactly like a drop-off to everyone). Not an
   // alert: no wake/beep, it shows on the next glance and in the rider list.
   // mv == 0 means "no battery monitor fitted there" -- nothing to judge.
   if (batteryMillivolts > 0) {
     if (!peer->batteryLowNotified && batteryMillivolts < BATTERY_LOW_MV) {
       peer->batteryLowNotified = true;
-      logEvent(peer->nickname, "AKKU", now);
+      logEvent(peer->nickname, "BATTERY", now);
     } else if (peer->batteryLowNotified && batteryMillivolts > BATTERY_LOW_CLEAR_MV) {
       peer->batteryLowNotified = false;
     }
   }
 
   if (isNewPeer || wasDroppedOff) {
-    // Fresh start for the trend in both cases. After a gap ("ZURUECK") the old
+    // Fresh start for the trend in both cases. After a gap ("back") the old
     // EMAs are stale -- the peer likely returns with a weak-but-recovering
     // signal, and judging that against the pre-gap baseline would log a
-    // spurious SCHWACH right on top of the ZURUECK.
+    // spurious "falling back" right on top of the "back".
     peer->rssiEmaFast = static_cast<float>(rssi);
     peer->rssiEmaSlow = static_cast<float>(rssi);
     peer->hasPreviousEma = false; // need one more heartbeat before a trend can be judged
     peer->fallingBack = false;
-    logEvent(peer->nickname, isNewPeer ? "DA" : "ZURUECK", now);
+    logEvent(peer->nickname, isNewPeer ? "JOINED" : "BACK", now);
   } else {
     peer->rssiEmaFast =
         RSSI_EMA_ALPHA_FAST * static_cast<float>(rssi) + (1.0f - RSSI_EMA_ALPHA_FAST) * peer->rssiEmaFast;
@@ -163,7 +164,7 @@ void onHeartbeat(uint16_t nodeId, const char *nickname, uint16_t batteryMillivol
     peer->hasPreviousEma = true;
 
     if (peer->fallingBack && !wasFallingBack) {
-      logAlert(peer->nickname, "SCHWACH", now, AlertType::FallingBack);
+      logAlert(peer->nickname, "WEAK", now, AlertType::FallingBack);
     }
   }
 }
@@ -178,7 +179,7 @@ void tick(uint32_t nowMs) {
       p.droppedOff = true;
       p.fallingBack = false;
       Stats::countDropOff();
-      logAlert(p.nickname, "ABRISS", nowMs, AlertType::DroppedOff);
+      logAlert(p.nickname, "DROPPED", nowMs, AlertType::DroppedOff);
     }
   }
 }

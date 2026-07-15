@@ -30,15 +30,15 @@ size_t writeHeader(uint8_t *out, MsgType type, uint16_t senderId, uint8_t seq) {
 const char *warningLabel(WarningType type) {
   switch (type) {
     case WarningType::CarBehind:
-      return "AUTO HINTEN";
+      return "CAR BEHIND";
     case WarningType::HazardAhead:
-      return "GEFAHR VORAUS";
+      return "HAZARD AHEAD";
     case WarningType::Stopping:
-      return "BREMSEN/STOPP";
+      return "BRAKING/STOP";
     case WarningType::Regroup:
-      return "SAMMELN/WARTEN";
+      return "REGROUP/WAIT";
     case WarningType::Attention:
-      return "ACHTUNG!";
+      return "ATTENTION!";
     default:
       return "?";
   }

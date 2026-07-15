@@ -36,14 +36,14 @@ enum class MsgType : uint8_t {
 // Ordered roughly by expected frequency of use -- also the order they cycle
 // through in the single-button send menu (see ui.cpp).
 enum class WarningType : uint8_t {
-  CarBehind = 1, // "Auto von hinten"
-  HazardAhead = 2, // "Gefahrenstelle voraus"
-  Stopping = 3, // "Bremsen / Stopp"
-  Regroup = 4, // "Sammeln / Warten"
+  CarBehind = 1, // "Car behind"
+  HazardAhead = 2, // "Hazard ahead"
+  Stopping = 3, // "Braking / stopping"
+  Regroup = 4, // "Regroup / wait"
   // Not in the send menu: fired by the double-click emergency gesture (works
   // blind, even while the display sleeps). Deliberately generic -- a blind
   // gesture must never claim something specific that might be wrong.
-  Attention = 5, // "Achtung!"
+  Attention = 5, // "Attention!"
 };
 
 // Human-readable short labels for the OLED (max ~16 chars at the chosen font).

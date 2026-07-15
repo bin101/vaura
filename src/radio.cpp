@@ -42,7 +42,7 @@ void startListening() {
   interruptArmed = true;
   int state = radio.startReceive();
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("Radio: startReceive fehlgeschlagen, Code %d\n", state);
+    Serial.printf("Radio: startReceive failed, code %d\n", state);
   }
 }
 
@@ -70,7 +70,7 @@ void begin() {
                               GFSK_RX_BANDWIDTH_KHZ, GFSK_TX_POWER_DBM, GFSK_PREAMBLE_LENGTH_BITS,
                               LORA_TCXO_VOLTAGE);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("Radio: SX1262 Init fehlgeschlagen, Code %d -- Geraet laeuft ohne Funk weiter.\n",
+    Serial.printf("Radio: SX1262 init failed, code %d -- device continues without radio.\n",
                    state);
     return;
   }
@@ -96,7 +96,7 @@ void begin() {
   dutyCycleBudgetUs = kDutyCycleCapacityUs; // start with a full tank
 
   startListening();
-  Serial.println("Radio: SX1262 bereit (EU868, GFSK).");
+  Serial.println("Radio: SX1262 ready (EU868, GFSK).");
 }
 
 void applyChannel(uint8_t channel) {
@@ -104,10 +104,10 @@ void applyChannel(uint8_t channel) {
   syncWord[GFSK_SYNC_WORD_LEN - 1] += channel;
   int state = radio.setSyncWord(syncWord, GFSK_SYNC_WORD_LEN);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("Radio: setSyncWord fehlgeschlagen, Code %d\n", state);
+    Serial.printf("Radio: setSyncWord failed, code %d\n", state);
   }
   startListening();
-  Serial.printf("Radio: Kanal %u aktiv.\n", channel);
+  Serial.printf("Radio: channel %u active.\n", channel);
 }
 
 bool poll(Protocol::DecodedPacket &pkt, int16_t &rssi) {
@@ -127,7 +127,7 @@ bool poll(Protocol::DecodedPacket &pkt, int16_t &rssi) {
   uint8_t buf[Protocol::kMaxPacketLen];
   int state = radio.readData(buf, len);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("Radio: readData Fehler, Code %d\n", state);
+    Serial.printf("Radio: readData error, code %d\n", state);
     startListening();
     return false;
   }
@@ -144,7 +144,7 @@ bool send(uint8_t *data, size_t len) {
 
   double timeOnAirUs = fullFrameTimeOnAirUs(len);
   if (timeOnAirUs > dutyCycleBudgetUs) {
-    Serial.println("Radio: Duty-Cycle-Budget erschoepft, Sendung uebersprungen.");
+    Serial.println("Radio: duty-cycle budget exhausted, transmission skipped.");
     return false;
   }
 
@@ -156,7 +156,7 @@ bool send(uint8_t *data, size_t len) {
   dutyCycleBudgetUs -= timeOnAirUs;
 
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("Radio: transmit Fehler, Code %d\n", state);
+    Serial.printf("Radio: transmit error, code %d\n", state);
   }
 
   startListening(); // transmit() leaves the radio in standby -- resume listening

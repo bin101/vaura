@@ -109,7 +109,7 @@ void setup() {
   nextHeartbeatMs = now + randomizedHeartbeatInterval();
   nextRosterTickMs = now + 1000;
 
-  Serial.println("Setup abgeschlossen.");
+  Serial.println("Setup complete.");
 }
 
 void loop() {

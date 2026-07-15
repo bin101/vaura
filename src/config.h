@@ -48,7 +48,7 @@
 // click before reporting it as a single click -- every single click therefore
 // reacts with exactly this delay. Shortened from OneButton's 400 ms default
 // so the send menu feels immediate; go lower only after testing that fast
-// double-clicks (the blind ACHTUNG gesture) are still recognized reliably.
+// double-clicks (the blind ATTENTION! gesture) are still recognized reliably.
 #define BUTTON_CLICK_MS 175
 // How long the button must be held before it counts as a long press
 // (OneButton's own default would be 800 ms). Lower feels snappier in the
@@ -68,21 +68,21 @@
 // ---------------------------------------------------------------------------
 #define PIN_PIEZO 2
 // Default/fallback frequency -- the actual frequency in use is user-adjustable
-// at runtime (idle screen: long-press -> settings rotation -> "Ton") and
+// at runtime (idle screen: long-press -> settings rotation -> "Tone") and
 // persisted in flash, see DeviceConfig::beepFrequencyHz() below. 3000 Hz sits
 // near the peak of human ear sensitivity and clears typical cycling wind
-// noise, which is low-frequency-dominated -- see README "Piezo-Lautstaerke".
+// noise, which is low-frequency-dominated -- see README "Piezo volume".
 #define BEEP_FREQUENCY_HZ 3000
 #define BEEP_FREQUENCY_MIN_HZ 2500
 #define BEEP_FREQUENCY_MAX_HZ 3500
 #define BEEP_FREQUENCY_STEP_HZ 100
-#define BEEP_TEST_DURATION_MS 500UL // sample playback while adjusting in the Ton menu
+#define BEEP_TEST_DURATION_MS 500UL // sample playback while adjusting in the Tone menu
 #define BEEP_DURATION_MS 80UL // length of one short beep
 #define BEEP_GAP_MS 80UL // silence between beeps within one beep sequence
 // Beep pattern per event, distinct so it's tellable apart by ear alone:
 #define WARNING_BEEP_COUNT 2 // incoming warning from another rider
-#define FALLING_BACK_BEEP_COUNT 3 // SCHWACH -- peer's signal is fading
-#define DROPPED_OFF_BEEP_DURATION_MS 1000UL // ABRISS -- one long tone, not a count
+#define FALLING_BACK_BEEP_COUNT 3 // falling back -- peer's signal is fading
+#define DROPPED_OFF_BEEP_DURATION_MS 1000UL // dropped off -- one long tone, not a count
 
 // ---------------------------------------------------------------------------
 // GFSK RF parameters -- EU868. Switched from LoRa to (G)FSK because this
@@ -90,7 +90,7 @@
 // point-to-point long-range), and GFSK's much shorter time-on-air lets the
 // heartbeat run far more often within the same legal duty-cycle budget --
 // which is what actually drives how fast a gap/drop-off is detected. See
-// README.md "Funkprotokoll" for the range/rate trade-off and the numbers
+// README.md "Radio protocol" for the range/rate trade-off and the numbers
 // behind the chosen bitrate.
 // ---------------------------------------------------------------------------
 #define GFSK_FREQUENCY_MHZ 868.3f
@@ -131,8 +131,8 @@
 // single EMA (alpha 0.35) the raw RSSI had to collapse by ~17 dB within one
 // 2 s heartbeat for the smoothed value to move the required 6 dB -- a rider
 // drifting off *gradually* (the actual early-warning use case) never fired
-// and went straight to ABRISS. The slow EMA (alpha 0.05, time constant ~20
-// heartbeats = ~40 s) is "where the signal usually sits"; the fast one is
+// and went straight to dropped-off. The slow EMA (alpha 0.05, time constant
+// ~20 heartbeats = ~40 s) is "where the signal usually sits"; the fast one is
 // "where it is right now".
 #define RSSI_FALLING_BACK_FLOOR_DBM -105
 #define RSSI_FALLING_BACK_DROP_DB 6
@@ -140,11 +140,11 @@
 #define RSSI_EMA_ALPHA_SLOW 0.05f
 
 // The floor is user-adjustable in 11 steps (0..10) via the settings menu
-// ("Empfindlich"), persisted in NVS -- see DeviceConfig::fallingBackSensitivity().
+// ("Sensitivity"), persisted in NVS -- see DeviceConfig::fallingBackSensitivity().
 // Each step shifts the floor by 3 dB; step 5 is the historical fixed value:
-//   step 0  -> -120 dBm: below the receiver's sensitivity (~-111 dBm), SCHWACH
-//              effectively never fires -- a clean "practically off" endpoint
-//              (ABRISS detection is unaffected).
+//   step 0  -> -120 dBm: below the receiver's sensitivity (~-111 dBm), falling
+//              back effectively never fires -- a clean "practically off"
+//              endpoint (dropped-off detection is unaffected).
 //   step 10 -> -90 dBm: for distant riders the floor is almost always met, so
 //              the check degenerates -- deliberately -- into the pure trend
 //              detector ("warn on any 6 dB sag against the baseline").
@@ -165,8 +165,8 @@ static_assert((BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_S
                   FALLING_BACK_SENSITIVITY_MAX,
               "tone and sensitivity menus share the same 0..10 ruler scale");
 
-// A peer is considered fully dropped ("Abriss") once its heartbeat has been
-// missing for this many intervals. Kept at 2 rather than 1: a single missed
+// A peer is considered fully dropped ("dropped off") once its heartbeat has
+// been missing for this many intervals. Kept at 2 rather than 1: a single missed
 // heartbeat is often just a collision on a shared channel with several peers
 // (all nodes are half-duplex -- two overlapping transmissions silently lose
 // both), not a real drop -- requiring 2 in a row filters that out.
@@ -175,7 +175,7 @@ static_assert((BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_S
 // the nominal interval: with one heartbeat lost, the legitimate gap is up to
 // DROPPED_OFF_MISSED_INTERVALS * (interval + jitter) = 4800 ms. Judging
 // against 2 * interval = 4000 ms (as an earlier version did) made every
-// single collision a coin-flip false ABRISS. The extra half interval covers
+// single collision a coin-flip false drop-off. The extra half interval covers
 // Roster::tick()'s 1 s granularity plus receive/dispatch latency. Trade-off:
 // a real drop is now reported after ~5.8 s instead of ~4 s.
 #define DROPPED_OFF_TIMEOUT_MS \
@@ -183,8 +183,9 @@ static_assert((BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_S
    HEARTBEAT_INTERVAL_MS / 2)
 
 // While a rider stays dropped off, remind with a short beep this often (the
-// wind can swallow the single long ABRISS tone). From the second reminder on
-// the UI also offers to remove the rider from the group -- see ui.cpp.
+// wind can swallow the single long dropped-off tone). From the second
+// reminder on the UI also offers to remove the rider from the group -- see
+// ui.cpp.
 #define DROPPED_OFF_REMINDER_INTERVAL_MS 60000UL
 
 #define MAX_PEERS 16
@@ -216,16 +217,16 @@ static_assert((BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_S
 #define BOOT_CHANNEL_SELECT_TIMEOUT_MS 10000UL
 
 // How long the OLED stays on after being woken (button press, incoming warning,
-// or a SCHWACH/ABRISS roster event), before going back to sleep to save power.
-// Default only -- the actual timeout is user-adjustable at runtime (settings
-// rotation -> "Anzeige") and persisted in flash, see
+// or a falling-back/dropped-off roster event), before going back to sleep to
+// save power. Default only -- the actual timeout is user-adjustable at
+// runtime (settings rotation -> "Display") and persisted in flash, see
 // DeviceConfig::displayTimeoutMs() below.
 #define OLED_WAKE_MS 30000UL
 // The selectable steps; 0 = the display never sleeps. One shared list so the
 // settings menu (ui.cpp) and the NVS-load validation (config.cpp) can never
 // disagree on what a legal value is. Labels are index-parallel.
 constexpr uint32_t OLED_TIMEOUT_STEPS_MS[] = {0, 15000, 30000, 60000, 300000};
-constexpr const char *OLED_TIMEOUT_LABELS[] = {"Nie", "15 s", "30 s", "1 min", "5 min"};
+constexpr const char *OLED_TIMEOUT_LABELS[] = {"Never", "15 s", "30 s", "1 min", "5 min"};
 constexpr size_t OLED_TIMEOUT_STEP_COUNT =
     sizeof(OLED_TIMEOUT_STEPS_MS) / sizeof(OLED_TIMEOUT_STEPS_MS[0]);
 static_assert(OLED_TIMEOUT_STEP_COUNT ==
@@ -243,7 +244,7 @@ namespace DeviceConfig {
 void begin();
 
 // Short display name, e.g. "ROB". Letters only, no digits -- see README.md
-// "Provisionierung". Never contains real names -- riders pick their own callsign.
+// "Provisioning". Never contains real names -- riders pick their own callsign.
 const char *nickname();
 
 // Persists a new nickname (max Protocol::kNicknameFieldLen chars, truncated)
@@ -270,8 +271,8 @@ void setBeepFrequencyHz(uint16_t hz);
 uint32_t displayTimeoutMs();
 void setDisplayTimeoutMs(uint32_t ms);
 
-// Persisted SCHWACH sensitivity step (0..FALLING_BACK_SENSITIVITY_MAX), see
-// fallingBackFloorDbm() above for the mapping. Falls back to
+// Persisted "falling back" sensitivity step (0..FALLING_BACK_SENSITIVITY_MAX),
+// see fallingBackFloorDbm() above for the mapping. Falls back to
 // FALLING_BACK_SENSITIVITY_DEFAULT if never set.
 uint8_t fallingBackSensitivity();
 void setFallingBackSensitivity(uint8_t level);

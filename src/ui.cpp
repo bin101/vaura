@@ -15,7 +15,7 @@ namespace {
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C display(U8G2_R0, /*reset=*/U8X8_PIN_NONE);
 
 // SettingsMenu: entered from Idle via long-press. Short press cycles through
-// Name/Ton/Zurueck (like the warning-send Menu below); long press commits to
+// Name/Tone/Back (like the warning-send Menu below); long press commits to
 // whichever is currently shown.
 enum class State { BootChannelSelect, Idle, Menu, IncomingWarning, Rename, SettingsMenu, ToneMenu, DisplayMenu, SensitivityMenu, ChannelMenu, StatsScreen, RangeTest, DismissPrompt };
 State state = State::Idle;
@@ -24,13 +24,13 @@ uint32_t stateEnteredMs = 0;
 // Ordered by expected mid-ride frequency: muting for a cafe stop first, the
 // tour statistics glance, then the tuning knobs (tone, display timeout,
 // sensitivity), the rarely-changed group channel and name, the field-test
-// tool, and back. The "Stumm" label is rendered dynamically with the current
+// tool, and back. The "Mute" label is rendered dynamically with the current
 // state (see renderSettingsMenu()).
-// "Empfindlich", not "Empfindlichkeit": the 9x15 menu font fits 14 glyphs per
-// line, the full word is 15.
-const char *kSettingsItemLabels[] = {"Stumm",       "Statistik", "Ton",  "Anzeige",
-                                     "Empfindlich", "Kanal",     "Name", "Test",
-                                     "Zurueck"};
+// All labels fit the 9x15 menu font's ~14-glyph-per-line budget;
+// "Sensitivity" (11 chars) is the longest and still comfortably fits.
+const char *kSettingsItemLabels[] = {"Mute",        "Stats", "Tone", "Display",
+                                     "Sensitivity", "Channel", "Name", "Test",
+                                     "Back"};
 const size_t kSettingsItemCount = sizeof(kSettingsItemLabels) / sizeof(kSettingsItemLabels[0]);
 constexpr size_t kSettingsItemMute = 0;
 constexpr size_t kSettingsItemStats = 1;
@@ -45,13 +45,13 @@ size_t settingsIndex = 0;
 
 // RangeTest ("Test" in settings): live RSSI readout for one chosen peer, the
 // field tool for verifying real-world range and tuning the RSSI_FALLING_BACK_*
-// thresholds (see README "Verifikation"). Index into the roster's slot order.
+// thresholds (see README "Verification"). Index into the roster's slot order.
 int rangeTestIndex = 0;
 
 // Mute switch for all alert beeps. Deliberately NOT persisted: after a restart
 // the device must never come up silently muted without the rider knowing --
 // forgetting to unmute after a break is the exact failure this avoids. The
-// idle screen shows a STUMM badge while active. Tone-menu test beeps bypass
+// idle screen shows a MUTE badge while active. Tone-menu test beeps bypass
 // this on purpose (adjusting the frequency is pointless without hearing it).
 bool muted = false;
 
@@ -64,8 +64,8 @@ uint16_t toneMenuFreq = BEEP_FREQUENCY_HZ;
 // same tentative-until-confirmed pattern as the ToneMenu above.
 size_t displayMenuIndex = 0;
 
-// SensitivityMenu: SCHWACH sensitivity step being tentatively adjusted,
-// same tentative-until-confirmed pattern.
+// SensitivityMenu: "falling back" sensitivity step being tentatively
+// adjusted, same tentative-until-confirmed pattern.
 uint8_t sensMenuLevel = FALLING_BACK_SENSITIVITY_DEFAULT;
 
 // ChannelMenu: radio group channel being tentatively adjusted, same pattern.
@@ -98,9 +98,9 @@ const size_t kRenameAlphabetLen = sizeof(kRenameAlphabet) - 1;
 char renameBuf[Protocol::kNicknameFieldLen + 1] = {0};
 uint8_t renamePos = 0;
 
-// A short local toast ("-> AUTO HINTEN gesendet") shown on the idle screen's
-// bottom line, competing with Roster's own join/drop/back events for whichever
-// is more recent.
+// A short local toast ("> CAR BEHIND") shown on the idle screen's bottom
+// line, competing with Roster's own join/drop/back events for whichever is
+// more recent.
 char toastBuf[24] = {0};
 uint32_t toastMs = 0;
 
@@ -108,7 +108,7 @@ uint32_t toastMs = 0;
 // on a lossy RF link -- see config.h WARNING_REPEAT_DELAY_MS. If the *first*
 // copy failed (duty-cycle budget / dead radio), the same mechanism doubles as
 // a retry: pendingRepeatFirstFailed remembers that so a succeeding repeat can
-// upgrade the "! NICHT gesendet" toast to the normal success one.
+// upgrade the "! NOT sent" toast to the normal success one.
 uint8_t pendingRepeatBuf[Protocol::kMaxPacketLen];
 size_t pendingRepeatLen = 0;
 uint32_t pendingRepeatDueMs = 0;
@@ -116,11 +116,11 @@ bool pendingRepeatArmed = false;
 bool pendingRepeatFirstFailed = false;
 Protocol::WarningType pendingRepeatType = Protocol::WarningType::CarBehind;
 
-// ABRISS reminder: while any (non-dismissed) rider stays dropped off, nudge
+// Drop-off reminder: while any (non-dismissed) rider stays dropped off, nudge
 // again every DROPPED_OFF_REMINDER_INTERVAL_MS -- the wind can swallow the
-// single long ABRISS tone. The first reminder is just a short beep; from the
-// second one on the idle screen turns into a prompt offering to remove the
-// rider from the group (State::DismissPrompt).
+// single long drop-off tone. The first reminder is just a short beep; from
+// the second one on the idle screen turns into a prompt offering to remove
+// the rider from the group (State::DismissPrompt).
 bool dropReminderArmed = false;
 uint32_t nextDropReminderMs = 0;
 uint8_t dropReminderCycles = 0;
@@ -131,12 +131,12 @@ const uint32_t kRenderThrottleMs = 200;
 
 // OLED sleep: the display is off whenever nothing has happened recently, and
 // wakes for a fixed window on button activity, an incoming warning, or a
-// SCHWACH/ABRISS roster event. The window length is user-adjustable (0 =
-// never sleep) -- see DeviceConfig::displayTimeoutMs().
+// "falling back"/"dropped off" roster event. The window length is
+// user-adjustable (0 = never sleep) -- see DeviceConfig::displayTimeoutMs().
 bool displayIsOn = true;
 uint32_t displayWakeUntilMs = 0;
 // Roster::lastAlertGeneration() we've already reacted to, so tick() only
-// wakes/beeps once per new SCHWACH/ABRISS event. A counter, not the alert's
+// wakes/beeps once per new such event. A counter, not the alert's
 // timestamp: two alerts logged in the same millisecond (e.g. two peers
 // dropping in one roster tick) would be indistinguishable by timestamp and
 // the second one would silently swallow its wake+beep.
@@ -162,7 +162,7 @@ void showToast(const char *text) {
 // plays it back on its own time, one queued step at a time. A frequency of 0
 // is how the gaps go silent (same mechanism noTone() uses internally). Each
 // event gets its own count/duration so the three are tellable apart by ear:
-// 2 short = incoming warning, 3 short = SCHWACH, 1 long = ABRISS.
+// 2 short = incoming warning, 3 short = falling back, 1 long = dropped off.
 void beepPattern(uint8_t count, uint32_t toneDurationMs) {
   if (muted) {
     return;
@@ -217,11 +217,11 @@ void sendWarning(Protocol::WarningType type) {
     // No beep on success, deliberately: the sender already sees the toast/display
     // right now, so an audible confirmation of their own action would be redundant.
     // beepPattern() is reserved for things worth an audible nudge precisely because
-    // you might not be looking -- an incoming warning, or a SCHWACH/ABRISS event.
+    // you might not be looking -- an incoming warning, or a falling-back/dropped-off event.
   } else {
     // The rider must never believe a warning went out when it didn't -- this is
     // the one own-action case that *does* beep, since eyes may be on the road.
-    showToast("! NICHT gesendet");
+    showToast("! NOT sent");
     beepPattern(1, BEEP_DURATION_MS);
   }
 }
@@ -377,8 +377,8 @@ void renameConfirmChar() {
 
 // A peer's nickname with its status baked into the string itself, so it
 // stays readable even when columns touch: "!NAME!" = signal fading (the same
-// fallingBack flag that drives the SCHWACH beep -- exclamation marks as the
-// active warning), "(NAME)" = dropped off ("Abriss" -- parenthesized like an
+// fallingBack flag that drives the "falling back" beep -- exclamation marks
+// as the active warning), "(NAME)" = dropped off (parenthesized like an
 // absentee), " NAME" = fine. The leading space keeps all first
 // name-characters vertically aligned. Max 5 name chars + 2 decoration = 7.
 void decorateNickname(char *out, size_t outLen, const Roster::PeerInfo &p) {
@@ -390,7 +390,7 @@ void renderIdle() {
   display.setFont(u8g2_font_6x10_tf);
   display.drawStr(0, 9, DeviceConfig::nickname());
 
-  // Right-aligned header block: "aktiv/total" rider counter, then own battery.
+  // Right-aligned header block: "active/total" rider counter, then own battery.
   int rightX = 128;
   if (batteryAvailableForDisplay) {
     // The '!' prefix is the low-battery nag -- the dedicated warning row the
@@ -423,14 +423,14 @@ void renderIdle() {
     if (x < nameEndX + 3) {
       x = nameEndX + 3;
     }
-    display.drawStr(x, 9, "STUMM");
+    display.drawStr(x, 9, "MUTE");
   }
 
   display.drawHLine(0, 12, 128);
 
   if (total == 0) {
     display.setFont(u8g2_font_9x15B_tf);
-    display.drawStr(0, 34, "Allein");
+    display.drawStr(0, 34, "Alone");
   } else {
     // The rider list, weakest signal first -- the riders at risk are the ones
     // this device exists for, so they are the ones that always fit. Dropped-off
@@ -531,20 +531,20 @@ void renderIdle() {
 
 void renderMenu() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Warnung senden:");
+  display.drawStr(0, 9, "Send warning:");
   display.drawHLine(0, 12, 128);
 
   display.setFont(u8g2_font_9x15B_tf);
   display.drawStr(0, 34, Protocol::warningLabel(kMenuItems[menuIndex]));
 
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 61, "kurz=vor lang=senden");
+  display.drawStr(0, 61, "short=next long=send");
 }
 
 void renderIncoming() {
   display.setFont(u8g2_font_6x10_tf);
   char header[24];
-  snprintf(header, sizeof(header), "WARNUNG von %s", incomingSenderNickname);
+  snprintf(header, sizeof(header), "WARNING from %s", incomingSenderNickname);
   display.drawStr(0, 9, header);
   display.drawHLine(0, 12, 128);
 
@@ -552,12 +552,12 @@ void renderIncoming() {
   display.drawStr(0, 34, Protocol::warningLabel(incomingType));
 
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 61, "kurz = wegklicken");
+  display.drawStr(0, 61, "short = dismiss");
 }
 
 void renderRename() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Name aendern:");
+  display.drawStr(0, 9, "Change name:");
   display.drawHLine(0, 12, 128);
 
   display.setFont(u8g2_font_9x15B_tf);
@@ -575,38 +575,38 @@ void renderRename() {
   display.setDrawColor(1);
 
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 61, renameWouldFinish() ? "lang=fertig" : "kurz=Zeichen lang=OK");
+  display.drawStr(0, 61, renameWouldFinish() ? "long=done" : "short=char long=OK");
 }
 
 void renderSettingsMenu() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Einstellungen:");
+  display.drawStr(0, 9, "Settings:");
   display.drawHLine(0, 12, 128);
 
   display.setFont(u8g2_font_9x15B_tf);
   if (settingsIndex == kSettingsItemMute) {
     char label[16];
-    snprintf(label, sizeof(label), "Stumm: %s", muted ? "AN" : "AUS");
+    snprintf(label, sizeof(label), "Mute: %s", muted ? "ON" : "OFF");
     display.drawStr(0, 34, label);
   } else {
     display.drawStr(0, 34, kSettingsItemLabels[settingsIndex]);
   }
 
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 61, "kurz=vor lang=waehlen");
+  display.drawStr(0, 61, "short=next long=select");
 }
 
 void renderRangeTest() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Reichweiten-Test:");
+  display.drawStr(0, 9, "Range test:");
   display.drawHLine(0, 12, 128);
 
   Roster::PeerInfo p;
   if (!Roster::peerInfo(rangeTestIndex, p)) {
     rangeTestIndex = 0;
     if (!Roster::peerInfo(0, p)) {
-      display.drawStr(0, 34, "(niemand gehoert)");
-      display.drawStr(0, 61, "lang=Ende");
+      display.drawStr(0, 34, "(nobody heard)");
+      display.drawStr(0, 61, "long=exit");
       return;
     }
   }
@@ -620,14 +620,14 @@ void renderRangeTest() {
   char detail[28];
   if (p.droppedOff) {
     uint32_t ageS = (millis() - p.lastSeenMs) / 1000;
-    snprintf(detail, sizeof(detail), "ABRISS  vor %lus", static_cast<unsigned long>(ageS));
+    snprintf(detail, sizeof(detail), "DROPPED  %lus ago", static_cast<unsigned long>(ageS));
   } else {
-    snprintf(detail, sizeof(detail), "roh %d dBm  vor %lus", p.lastRawRssiDbm,
+    snprintf(detail, sizeof(detail), "raw %d dBm  %lus ago", p.lastRawRssiDbm,
              static_cast<unsigned long>((millis() - p.lastSeenMs) / 1000));
   }
   display.drawStr(0, 46, detail);
 
-  display.drawStr(0, 61, "kurz=Fahrer lang=Ende");
+  display.drawStr(0, 61, "short=rider long=exit");
 }
 
 // Ruler-style scale shared by the tone and sensitivity menus: a baseline with
@@ -661,73 +661,73 @@ void drawLevelRuler(uint8_t activeLevel) {
 
 void renderToneMenu() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Ton einstellen:");
+  display.drawStr(0, 9, "Set tone:");
   display.drawHLine(0, 12, 128);
 
   // Same 0..10 legend as the sensitivity menu (deliberately no Hz here --
   // the ear judges the test beep, the number is just a position to remember).
   uint8_t level = static_cast<uint8_t>((toneMenuFreq - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_STEP_HZ);
   char valueStr[12];
-  snprintf(valueStr, sizeof(valueStr), "Stufe %u", level);
+  snprintf(valueStr, sizeof(valueStr), "Level %u", level);
   display.drawStr(0, 26, valueStr);
   drawLevelRuler(level);
 
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 61, "kurz=aendern lang=OK");
+  display.drawStr(0, 61, "short=change long=OK");
 }
 
 void renderSensitivityMenu() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Empfindlichkeit:");
+  display.drawStr(0, 9, "Sensitivity:");
   display.drawHLine(0, 12, 128);
 
   char valueStr[12];
-  snprintf(valueStr, sizeof(valueStr), "Stufe %u", sensMenuLevel);
+  snprintf(valueStr, sizeof(valueStr), "Level %u", sensMenuLevel);
   display.drawStr(0, 26, valueStr);
   drawLevelRuler(sensMenuLevel);
 
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 61, "kurz=aendern lang=OK");
+  display.drawStr(0, 61, "short=change long=OK");
 }
 
 void renderStatsScreen() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Statistik:");
+  display.drawStr(0, 9, "Stats:");
   // Right-aligned firmware version; long between-release strings
   // ("v0.1.0-3-g...") clip at the panel edge -- the full string is always in
   // the serial boot line and the `status` output.
   int verX = 128 - 6 * static_cast<int>(strlen(FIRMWARE_VERSION));
   if (verX < 66) {
-    verX = 66; // keep clear of the "Statistik:" label, clip the tail instead
+    verX = 66; // keep clear of the "Stats:" label, clip the tail instead
   }
   display.drawStr(verX, 9, FIRMWARE_VERSION);
   display.drawHLine(0, 12, 128);
 
   uint32_t upMin = millis() / 60000UL;
   char line[22];
-  snprintf(line, sizeof(line), "Fahrzeit    %lu:%02luh", static_cast<unsigned long>(upMin / 60),
+  snprintf(line, sizeof(line), "Ride time  %lu:%02luh", static_cast<unsigned long>(upMin / 60),
            static_cast<unsigned long>(upMin % 60));
   display.drawStr(0, 23, line);
-  snprintf(line, sizeof(line), "Warn gesendet  %4lu",
+  snprintf(line, sizeof(line), "Sent           %4lu",
            static_cast<unsigned long>(Stats::warningsSent()));
   display.drawStr(0, 33, line);
-  snprintf(line, sizeof(line), "Warn empfangen %4lu",
+  snprintf(line, sizeof(line), "Received       %4lu",
            static_cast<unsigned long>(Stats::warningsReceived()));
   display.drawStr(0, 43, line);
-  snprintf(line, sizeof(line), "Abrisse        %4lu", static_cast<unsigned long>(Stats::dropOffs()));
+  snprintf(line, sizeof(line), "Dropped        %4lu", static_cast<unsigned long>(Stats::dropOffs()));
   display.drawStr(0, 53, line);
 
-  display.drawStr(0, 61, "lang=zurueck");
+  display.drawStr(0, 61, "long=back");
 }
 
 void renderBootChannelSelect() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Kanal waehlen:");
+  display.drawStr(0, 9, "Select channel:");
   display.drawHLine(0, 12, 128);
 
   display.setFont(u8g2_font_9x15B_tf);
   char chStr[12];
-  snprintf(chStr, sizeof(chStr), "Kanal %u", channelMenuValue);
+  snprintf(chStr, sizeof(chStr), "Channel %u", channelMenuValue);
   display.drawStr(0, 34, chStr);
 
   display.setFont(u8g2_font_6x10_tf);
@@ -736,31 +736,31 @@ void renderBootChannelSelect() {
                             ? 0
                             : (BOOT_CHANNEL_SELECT_TIMEOUT_MS - elapsed + 999) / 1000;
   char detail[24];
-  snprintf(detail, sizeof(detail), "Start in %lus ...", static_cast<unsigned long>(remainingS));
+  snprintf(detail, sizeof(detail), "Starting in %lus ...", static_cast<unsigned long>(remainingS));
   display.drawStr(0, 46, detail);
-  display.drawStr(0, 61, "kurz=aendern lang=OK");
+  display.drawStr(0, 61, "short=change long=OK");
 }
 
 void renderChannelMenu() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Funk-Kanal:");
+  display.drawStr(0, 9, "Radio channel:");
   display.drawHLine(0, 12, 128);
 
   display.setFont(u8g2_font_9x15B_tf);
   char chStr[12];
-  snprintf(chStr, sizeof(chStr), "Kanal %u", channelMenuValue);
+  snprintf(chStr, sizeof(chStr), "Channel %u", channelMenuValue);
   display.drawStr(0, 34, chStr);
 
   display.setFont(u8g2_font_6x10_tf);
   // Different channels never hear each other -- worth spelling out right in
   // the menu, a mismatch looks exactly like everyone dropping off.
-  display.drawStr(0, 46, "alle Geraete gleich!");
-  display.drawStr(0, 61, "kurz=aendern lang=OK");
+  display.drawStr(0, 46, "all devices must match!");
+  display.drawStr(0, 61, "short=change long=OK");
 }
 
 void renderDismissPrompt() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Noch abgerissen:");
+  display.drawStr(0, 9, "Still dropped off:");
   display.drawHLine(0, 12, 128);
 
   char deco[Protocol::kNicknameFieldLen + 3];
@@ -771,22 +771,22 @@ void renderDismissPrompt() {
   display.setFont(u8g2_font_6x10_tf);
   char detail[24];
   uint32_t ageMin = (millis() - dismissCandidate.lastSeenMs) / 60000UL;
-  snprintf(detail, sizeof(detail), "weg seit %lu min", static_cast<unsigned long>(ageMin));
+  snprintf(detail, sizeof(detail), "gone %lu min", static_cast<unsigned long>(ageMin));
   display.drawStr(0, 46, detail);
 
-  display.drawStr(0, 61, "kurz=ok lang=raus");
+  display.drawStr(0, 61, "short=keep long=remove");
 }
 
 void renderDisplayMenu() {
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 9, "Anzeige aus nach:");
+  display.drawStr(0, 9, "Display off after:");
   display.drawHLine(0, 12, 128);
 
   display.setFont(u8g2_font_9x15B_tf);
   display.drawStr(0, 34, OLED_TIMEOUT_LABELS[displayMenuIndex]);
 
   display.setFont(u8g2_font_6x10_tf);
-  display.drawStr(0, 61, "kurz=aendern lang=OK");
+  display.drawStr(0, 61, "short=change long=OK");
 }
 
 void render() {
@@ -945,8 +945,8 @@ void tick() {
     }
   }
 
-  // A SCHWACH/ABRISS event is worth interrupting the rider for, even if the
-  // display was asleep -- wake it exactly once per new such event.
+  // A "falling back"/"dropped off" event is worth interrupting the rider for,
+  // even if the display was asleep -- wake it exactly once per new such event.
   uint32_t alertGen = Roster::lastAlertGeneration();
   if (alertGen != lastSeenAlertGeneration) {
     lastSeenAlertGeneration = alertGen;
@@ -959,7 +959,7 @@ void tick() {
     needsRender = true;
   }
 
-  // Periodic ABRISS reminder while someone stays dropped off. Armed when the
+  // Periodic drop-off reminder while someone stays dropped off. Armed when the
   // first drop is noticed, disarmed (and the cycle counter reset) as soon as
   // everyone is back or removed. From the second cycle on, the beep comes
   // with the removal prompt -- but only over the idle screen; an open menu,
@@ -1093,12 +1093,12 @@ void onButtonLongPress() {
     case State::DismissPrompt: {
       char toast[24];
       if (Roster::dismiss(dismissCandidate.nodeId)) {
-        snprintf(toast, sizeof(toast), "%s entfernt", dismissCandidate.nickname);
+        snprintf(toast, sizeof(toast), "%s removed", dismissCandidate.nickname);
       } else {
         // Heartbeat came back between prompt and long press -- dismiss() was
-        // a no-op, and claiming "entfernt" over a list that shows the rider
+        // a no-op, and claiming "removed" over a list that shows the rider
         // alive would be a lie.
-        snprintf(toast, sizeof(toast), "%s ist zurueck", dismissCandidate.nickname);
+        snprintf(toast, sizeof(toast), "%s is back", dismissCandidate.nickname);
       }
       showToast(toast);
       enterIdle();
@@ -1170,14 +1170,14 @@ void onButtonLongPress() {
 void onButtonDoubleClick() {
   if (state == State::BootChannelSelect) {
     // Booting is never the emergency moment -- treat this as a confirm
-    // instead of firing an ACHTUNG onto a possibly-wrong group.
+    // instead of firing an ATTENTION! onto a possibly-wrong group.
     wakeDisplay();
     confirmBootChannel();
     render();
     return;
   }
   // No display-asleep swallow here, unlike click/long-press: this is the
-  // "warn NOW, eyes stay on the road" path, and sending a generic ACHTUNG
+  // "warn NOW, eyes stay on the road" path, and sending a generic ATTENTION!
   // blind is exactly its purpose. Whatever menu/edit was open is abandoned --
   // same priority call as an incoming warning taking over the screen.
   wakeDisplay();

@@ -3,7 +3,7 @@
 #include <Preferences.h>
 
 #include "protocol.h"
-#include "radio.h" // Kanal-Aenderungen der Konsole wirken sofort (applyChannel)
+#include "radio.h" // console channel changes apply immediately (applyChannel)
 
 namespace DeviceConfig {
 
@@ -38,16 +38,16 @@ bool containsDigit(const String &s) {
 }
 
 void printHelp() {
-  Serial.println(F("---- Warngeraet Konsole ----"));
-  Serial.println(F("name <bis 5 Buchstaben>  Spitznamen setzen, z.B.: name ROB"));
-  Serial.println(F("id                       Node-ID anzeigen"));
-  Serial.println(F("status                   Alle Einstellungen als key=value ausgeben"));
-  Serial.println(F("kanal <0-9>              Funk-Kanal setzen (wirkt sofort)"));
-  Serial.println(F("empfindlich <0-10>       SCHWACH-Empfindlichkeitsstufe setzen"));
-  Serial.println(F("ton <0-10>               Piezo-Tonstufe setzen (spielt Testton)"));
-  Serial.println(F("anzeige <0|15|30|60|300> Display-Abschaltzeit in Sekunden (0 = nie)"));
-  Serial.println(F("beep [Hz]                Testton abspielen, z.B.: beep 3200 (ohne Hz: aktuell eingestellte Frequenz)"));
-  Serial.println(F("help                     Diese Hilfe anzeigen"));
+  Serial.println(F("---- Vaura Console ----"));
+  Serial.println(F("name <up to 5 letters>   Set nickname, e.g.: name ROB"));
+  Serial.println(F("id                       Show node ID"));
+  Serial.println(F("status                   Print all settings as key=value"));
+  Serial.println(F("channel <0-9>            Set radio channel (applies immediately)"));
+  Serial.println(F("sensitivity <0-10>       Set falling-back sensitivity level"));
+  Serial.println(F("tone <0-10>              Set piezo tone level (plays a test beep)"));
+  Serial.println(F("display <0|15|30|60|300> Display auto-off in seconds (0 = never)"));
+  Serial.println(F("beep [Hz]                Play a test tone, e.g.: beep 3200 (no Hz: current frequency)"));
+  Serial.println(F("help                     Show this help"));
 }
 
 // Strictly numeric argument after `prefixLen` chars, or -1. toInt() alone is
@@ -80,66 +80,66 @@ void handleLine(const String &lineIn) {
   if (lower.equals("help")) {
     printHelp();
   } else if (lower.equals("id")) {
-    Serial.printf("Node-ID: %04X\n", cachedNodeId);
+    Serial.printf("Node ID: %04X\n", cachedNodeId);
   } else if (lower.startsWith("name ")) {
     String name = line.substring(5);
     name.trim();
     if (name.length() == 0) {
-      Serial.println(F("Fehler: kein Name angegeben."));
+      Serial.println(F("Error: no name given."));
     } else if (name.length() > Protocol::kNicknameFieldLen) {
       // Rejected, not silently truncated: a name that got cut off without
       // being told would be confusing on a device with no keyboard to fix it.
-      Serial.printf("Fehler: max. %u Zeichen (sonst laeuft die Anzeige ueber). Bitte kuerzer waehlen.\n",
+      Serial.printf("Error: max. %u characters (otherwise the display overflows). Please choose a shorter name.\n",
                     static_cast<unsigned>(Protocol::kNicknameFieldLen));
     } else if (containsDigit(name)) {
       // Keeps this path consistent with the on-device rename menu, whose
       // cycling alphabet is letters-only -- see ui.cpp.
-      Serial.println(F("Fehler: Zahlen sind im Namen nicht erlaubt. Bitte nur Buchstaben verwenden."));
+      Serial.println(F("Error: digits are not allowed in the name. Please use letters only."));
     } else {
       setNickname(name.c_str());
-      Serial.printf("Gespeichert. Spitzname ist jetzt: %s\n", nickname());
+      Serial.printf("Saved. Nickname is now: %s\n", nickname());
     }
   } else if (lower.equals("status")) {
-    // Machine-readable key=value lines -- parsed by the Warngeraet-Flasher's
+    // Machine-readable key=value lines -- parsed by the Vaura Flasher's
     // settings panel. Keys are part of that interface: keep them stable.
     Serial.printf("name=%s\n", nicknameBuf);
     Serial.printf("id=%04X\n", cachedNodeId);
     Serial.printf("version=%s\n", FIRMWARE_VERSION);
-    Serial.printf("kanal=%u\n", cachedChannel);
-    Serial.printf("empfindlich=%u\n", cachedFallingBackSensitivity);
-    Serial.printf("ton=%u\n",
+    Serial.printf("channel=%u\n", cachedChannel);
+    Serial.printf("sensitivity=%u\n", cachedFallingBackSensitivity);
+    Serial.printf("tone=%u\n",
                   (cachedBeepFrequencyHz - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_STEP_HZ);
-    Serial.printf("anzeige=%lu\n", static_cast<unsigned long>(cachedDisplayTimeoutMs / 1000UL));
-  } else if (lower.startsWith("kanal ")) {
-    long ch = parseNumericArg(line, 6);
+    Serial.printf("display=%lu\n", static_cast<unsigned long>(cachedDisplayTimeoutMs / 1000UL));
+  } else if (lower.startsWith("channel ")) {
+    long ch = parseNumericArg(line, 8);
     if (ch < 0 || ch > GROUP_CHANNEL_MAX) {
-      Serial.printf("Fehler: Kanal 0-%d erwartet.\n", GROUP_CHANNEL_MAX);
+      Serial.printf("Error: expected channel 0-%d.\n", GROUP_CHANNEL_MAX);
     } else {
       setChannel(static_cast<uint8_t>(ch));
       Radio::applyChannel(static_cast<uint8_t>(ch));
-      Serial.printf("OK kanal=%ld\n", ch);
+      Serial.printf("OK channel=%ld\n", ch);
     }
-  } else if (lower.startsWith("empfindlich ")) {
+  } else if (lower.startsWith("sensitivity ")) {
     long level = parseNumericArg(line, 12);
     if (level < 0 || level > FALLING_BACK_SENSITIVITY_MAX) {
-      Serial.printf("Fehler: Stufe 0-%d erwartet.\n", FALLING_BACK_SENSITIVITY_MAX);
+      Serial.printf("Error: expected level 0-%d.\n", FALLING_BACK_SENSITIVITY_MAX);
     } else {
       setFallingBackSensitivity(static_cast<uint8_t>(level));
-      Serial.printf("OK empfindlich=%ld (Floor %d dBm)\n", level,
+      Serial.printf("OK sensitivity=%ld (floor %d dBm)\n", level,
                     fallingBackFloorDbm(static_cast<uint8_t>(level)));
     }
-  } else if (lower.startsWith("ton ")) {
-    long level = parseNumericArg(line, 4);
+  } else if (lower.startsWith("tone ")) {
+    long level = parseNumericArg(line, 5);
     constexpr long kMaxToneLevel = (BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_STEP_HZ;
     if (level < 0 || level > kMaxToneLevel) {
-      Serial.printf("Fehler: Stufe 0-%ld erwartet.\n", kMaxToneLevel);
+      Serial.printf("Error: expected level 0-%ld.\n", kMaxToneLevel);
     } else {
       uint16_t hz = BEEP_FREQUENCY_MIN_HZ + static_cast<uint16_t>(level) * BEEP_FREQUENCY_STEP_HZ;
       setBeepFrequencyHz(hz);
       tone(PIN_PIEZO, hz, 600);
-      Serial.printf("OK ton=%ld (%u Hz)\n", level, hz);
+      Serial.printf("OK tone=%ld (%u Hz)\n", level, hz);
     }
-  } else if (lower.startsWith("anzeige ")) {
+  } else if (lower.startsWith("display ")) {
     long seconds = parseNumericArg(line, 8);
     uint32_t ms = seconds < 0 ? 1 : static_cast<uint32_t>(seconds) * 1000UL;
     bool knownStep = false;
@@ -150,10 +150,10 @@ void handleLine(const String &lineIn) {
       }
     }
     if (!knownStep) {
-      Serial.println(F("Fehler: 0, 15, 30, 60 oder 300 Sekunden erwartet (0 = nie)."));
+      Serial.println(F("Error: expected 0, 15, 30, 60, or 300 seconds (0 = never)."));
     } else {
       setDisplayTimeoutMs(ms);
-      Serial.printf("OK anzeige=%ld\n", seconds);
+      Serial.printf("OK display=%ld\n", seconds);
     }
   } else if (lower.equals("beep") || lower.startsWith("beep ")) {
     String arg = line.length() > 4 ? line.substring(4) : "";
@@ -164,13 +164,13 @@ void handleLine(const String &lineIn) {
     // duration so repeated "beep <Hz>" calls are directly comparable by ear.
     unsigned int freq = arg.length() == 0 ? beepFrequencyHz() : static_cast<unsigned int>(arg.toInt());
     if (freq == 0) {
-      Serial.println(F("Fehler: ungueltige Frequenz."));
+      Serial.println(F("Error: invalid frequency."));
     } else {
-      Serial.printf("Piepe bei %u Hz...\n", freq);
+      Serial.printf("Beeping at %u Hz...\n", freq);
       tone(PIN_PIEZO, freq, 600);
     }
   } else {
-    Serial.println(F("Unbekannter Befehl. 'help' fuer Uebersicht."));
+    Serial.println(F("Unknown command. 'help' for an overview."));
   }
 }
 } // namespace
@@ -186,7 +186,7 @@ void begin() {
     // Everything below still works off the defaults; the put* calls will just
     // silently do nothing -- worth one loud line so a "settings don't stick"
     // report is diagnosable from the boot log.
-    Serial.println("Konfiguration: NVS nicht verfuegbar -- Einstellungen koennen nicht gespeichert werden!");
+    Serial.println("Config: NVS unavailable -- settings cannot be saved!");
   }
   String stored = prefs.getString("nickname", "");
   if (stored.length() == 0) {
@@ -232,7 +232,7 @@ void begin() {
     cachedChannel = 0; // corrupt flash content -> back to the common default
   }
 
-  Serial.printf("Node-ID: %04X  Spitzname: %s  Kanal: %u  FW %s  (Konsole: 'help')\n", cachedNodeId,
+  Serial.printf("Node ID: %04X  Nickname: %s  Channel: %u  FW %s  (console: 'help')\n", cachedNodeId,
                 nicknameBuf, cachedChannel, FIRMWARE_VERSION);
 }
 
