@@ -1,0 +1,65 @@
+# Automatically tags every push to main with the next Semantic Versioning
+# release, derived from Conventional Commit messages since the last tag
+# (feat: -> minor, a "!" or "BREAKING CHANGE" footer -> major, anything else
+# -> patch). Pushing the new tag triggers release.yml, which builds and
+# publishes the actual firmware + flasher release -- this workflow only
+# decides *whether* and *what* to release.
+name: Auto Tag
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine and push the next version tag
+        run: |
+          set -euo pipefail
+          git fetch --tags --quiet
+
+          last_tag=$(git tag -l "v*" --sort=-v:refname | head -n1)
+          if [ -z "$last_tag" ]; then
+            last_tag="v0.0.0"
+            range="HEAD"
+          else
+            range="${last_tag}..HEAD"
+          fi
+          echo "Last tag: $last_tag"
+
+          commits=$(git log "$range" --format='%s%n%b' || true)
+          if [ -z "$commits" ]; then
+            echo "No commits since $last_tag -- nothing to release."
+            exit 0
+          fi
+
+          bump="patch"
+          if echo "$commits" | grep -qE '(^|\()[a-z]+(\([a-zA-Z0-9_./-]+\))?!:|BREAKING CHANGE'; then
+            bump="major"
+          elif echo "$commits" | grep -qE '^feat(\([a-zA-Z0-9_./-]+\))?:'; then
+            bump="minor"
+          fi
+          echo "Bump: $bump"
+
+          version="${last_tag#v}"
+          IFS='.' read -r major minor patch <<< "$version"
+          case "$bump" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          new_tag="v${major}.${minor}.${patch}"
+          echo "New tag: $new_tag"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$new_tag" -m "Release $new_tag"
+          git push origin "$new_tag"

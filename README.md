@@ -86,7 +86,7 @@ pio test -e native           # unit tests, run on the computer (no hardware need
 
 Every device gets **the same** firmware — there are no compile-time differences between devices.
 
-**Versioning:** The project uses [Semantic Versioning](https://semver.org/) via git tags (`v0.1.0`, `v0.2.0`, …) and [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:` …). The firmware picks up its version automatically at build time from `git describe` (`FIRMWARE_VERSION`, e.g. `v0.1.0-5-gabc1234` between releases, with `-dirty` on local changes) and shows it at boot in the event line, in the stats screen header, in the serial boot line, and in the `status` output — so it's quick to check who's running which version at the meeting point.
+**Versioning:** The project uses [Semantic Versioning](https://semver.org/) via git tags (`v0.1.0`, `v0.2.0`, …) and [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:` …). The firmware picks up its version automatically at build time from `git describe` (`FIRMWARE_VERSION`, e.g. `v0.1.0-5-gabc1234` between releases, with `-dirty` on local changes) and shows it at boot in the event line, in the stats screen header, in the serial boot line, and in the `status` output — so it's quick to check who's running which version at the meeting point. All changes go through a **feature branch + PR**; merging into `main` automatically cuts a new release (see "Releasing" below) — there's deliberately no direct-push-to-`main` workflow.
 
 The unit tests (in `test/`) cover the radio packet format (`src/protocol.cpp`: encode/decode roundtrips, malformed packets) and the battery voltage curve (`src/battery_curve.cpp`). On every push, GitHub Actions (`.github/workflows/ci.yml`) additionally builds the firmware and runs the tests.
 
@@ -132,11 +132,17 @@ A standalone app (runnable without a Python install) is built with PyInstaller �
 # a single binary or a .exe on Linux/Windows
 ```
 
-### Publishing a release (maintainers)
+### Releasing (maintainers)
 
-1. **One-time:** create a public GitHub repo and set the `GITHUB_REPO` constant in `flasher/flasher.py` from the placeholder to `user/repo` — before that, the app can only flash local files.
-2. Push a tag: `git tag v1.0.0 && git push origin main --tags`.
-3. `.github/workflows/release.yml` then automatically builds the release: unit tests → firmware → `vaura-firmware.bin` (merged binary) + the four flasher apps as assets.
+Releases are **fully automatic** — there's no manual tagging step in the normal case:
+
+1. Work happens on a feature branch; open a PR into `main` and merge it.
+2. `.github/workflows/auto-tag.yml` runs on every push to `main`, looks at the commit messages since the last tag, and picks the next [SemVer](https://semver.org/) bump: a `!` after the commit type or a `BREAKING CHANGE` footer → major, `feat:` → minor, anything else (`fix:`, `docs:`, `chore:`, ...) → patch. It then creates and pushes that tag.
+3. The new tag triggers `.github/workflows/release.yml`, which runs the unit tests, builds the firmware (`vaura-firmware.bin`), packages the flasher for all four platforms, and publishes everything as a GitHub release with auto-generated notes.
+
+A maintainer can still push a tag by hand (`git tag vX.Y.Z && git push origin vX.Y.Z`) to trigger a one-off release outside this flow.
+
+**One-time setup for a new fork:** create a public GitHub repo and set the `GITHUB_REPO` constant in `flasher/flasher.py` from the placeholder to `user/repo` — before that, the app can only flash local files.
 
 ## Provisioning (once per device)
 
