@@ -49,16 +49,35 @@ an empty gray window.
 
 - **Language:** everything is English — code, comments, docs, commit messages, and all
   user-facing product text (OLED screens, serial console, flasher GUI). No German.
+- **Feature branches only.** Don't commit directly to `main` — create a branch, open a PR, merge
+  it. This is also what drives releases (see below), so a direct push to `main` is not just a
+  process nicety, it's what the auto-tag workflow reacts to.
 - **Versioning:** [Semantic Versioning](https://semver.org/) via git tags (`v0.1.0`, ...) +
   [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`,
   `refactor:`, `chore:` ...). `FIRMWARE_VERSION` is injected at build time from
-  `git describe --tags` (see `platformio.ini`).
+  `git describe --tags` (see `platformio.ini`). Commit type drives the automatic version bump —
+  see "Releasing" below — so get it right.
 - **No AI attribution in commits.** Do not add `Co-Authored-By` or session-link trailers.
 - **Wire-format changes require a `Protocol::kVersion` bump.** The protocol intentionally rejects
   mismatched versions symmetrically (see the comment on `kVersion` in `src/protocol.h`) rather
   than degrading silently — a version bump means the whole fleet must be reflashed together.
 - **Display-only string changes** (menu labels, warning text) do **not** need a version bump —
   only the wire-format bytes are versioned, not what's printed on screen.
+
+## Releasing
+
+Every push to `main` (i.e. every merged PR) is auto-tagged and released — there is no manual
+release step in the normal case:
+
+1. `.github/workflows/auto-tag.yml` scans commit messages since the last tag and picks the next
+   [SemVer](https://semver.org/) bump: any `!` after the type or a `BREAKING CHANGE` footer →
+   major, `feat:` → minor, anything else (`fix:`, `docs:`, `chore:`, ...) → patch. It always tags
+   and releases something if there's a new commit — there's no "skip the release" path.
+2. Pushing that tag triggers `.github/workflows/release.yml`, which builds the firmware, packages
+   the flasher for all platforms, and publishes the GitHub release with auto-generated notes.
+
+Implication: a PR's squashed/merged commit message(s) determine the release type, so write them
+with that in mind (this is also why Conventional Commits matter here beyond style).
 
 ## Persisted settings (NVS, namespace `"warndevice"`)
 

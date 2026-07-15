@@ -1,4 +1,6 @@
-# Release pipeline: runs on every "v*" git tag (e.g. v1.0.0).
+# Release pipeline: runs on every "v*" git tag (e.g. v1.0.0). Tags are
+# normally created automatically by auto-tag.yml on every push to main; a
+# maintainer can still push a tag by hand for a one-off release.
 #
 # Produces a GitHub release with:
 #   - vaura-firmware.bin       Merged binary (bootloader + partition table +
