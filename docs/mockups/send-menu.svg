@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-3 0 134 64" width="512" height="244">
+  <defs>
+    <filter id="glowY" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="0.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glowB" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="0.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <pattern id="scan" width="1" height="4" patternUnits="userSpaceOnUse">
+      <rect width="1" height="1" fill="#000" opacity="0.35"/>
+    </pattern>
+  </defs>
+  <style>
+    text { font-family: ui-monospace, "SF Mono", "Cascadia Mono", "Courier New", monospace; }
+    .y { fill: #ffd97a; }
+    .b { fill: #7ecbff; }
+    .bdim { fill: #55889f; }
+  </style>
+  <rect x="-3" y="0" width="134" height="64" fill="#04070a"/>
+  <text x="0" y="9" font-size="8" text-anchor="start" class="y" filter="url(#glowY)">Send warning:</text>
+  <line x1="0" y1="12" x2="128" y2="12" stroke="#ffd97a" stroke-width="1" class="y" filter="url(#glowY)"/>
+  <text x="0" y="34" font-size="13" font-weight="bold" text-anchor="start" class="b" filter="url(#glowB)">CAR BEHIND</text>
+  <text x="0" y="61" font-size="8" text-anchor="start" class="b" filter="url(#glowB)">short=next long=send</text>
+  <rect x="-3" y="0" width="134" height="64" fill="url(#scan)"/>
+</svg>
