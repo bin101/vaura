@@ -14,12 +14,15 @@ Self-test without GUI: python flasher.py --check
 import json
 import queue
 import re
+import ssl
 import sys
 import tempfile
 import threading
 import time
 import urllib.request
 from pathlib import Path
+
+import certifi
 
 # ---------------------------------------------------------------------------
 # GitHub repo (public) whose releases the flasher downloads firmware from --
@@ -49,6 +52,11 @@ NVS_END = 0xE000
 # Older Tk versions (macOS's system Python ships 8.5.9 from 2010) no longer
 # draw widgets on current macOS -- just an empty gray window.
 MIN_TK_VERSION = 8.6
+
+# certifi's bundle instead of the system trust store -- some Python installs
+# (notably python.org builds on macOS, and the frozen PyInstaller app) don't
+# have it wired up, which makes urlopen() fail with CERTIFICATE_VERIFY_FAILED.
+SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 # Serial console of the running firmware (read/write settings).
 DEVICE_BAUD = 115200
@@ -169,7 +177,7 @@ def fetch_latest_release():
         )
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
     req = urllib.request.Request(url, headers={"User-Agent": APP_TITLE})
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=15, context=SSL_CONTEXT) as resp:
         release = json.load(resp)
     for asset in release.get("assets", []):
         if asset.get("name") == FIRMWARE_ASSET_NAME:
@@ -184,7 +192,7 @@ def download_firmware(url, progress_cb=None):
     """Downloads the firmware to a temp file, returns the path."""
     req = urllib.request.Request(url, headers={"User-Agent": APP_TITLE})
     fd, path = tempfile.mkstemp(prefix="vaura-", suffix=".bin")
-    with urllib.request.urlopen(req, timeout=60) as resp, open(fd, "wb") as out:
+    with urllib.request.urlopen(req, timeout=60, context=SSL_CONTEXT) as resp, open(fd, "wb") as out:
         total = int(resp.headers.get("Content-Length") or 0)
         done = 0
         while True:
