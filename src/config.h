@@ -44,10 +44,11 @@
 // double-clicks (the blind ACHTUNG gesture) are still recognized reliably.
 #define BUTTON_CLICK_MS 175
 // How long the button must be held before it counts as a long press
-// (= OneButton's default). Lower feels snappier in the menus but narrows the
-// gap to a slow "normal" click -- with winter gloves a deliberate short press
-// easily lasts 300+ ms, so keep a comfortable margin above BUTTON_CLICK_MS.
-#define BUTTON_LONG_PRESS_MS 800
+// (OneButton's own default would be 800 ms). Lower feels snappier in the
+// menus but narrows the gap to a slow "normal" click -- with winter gloves a
+// deliberate short press easily lasts 300+ ms, so keep a comfortable margin
+// above BUTTON_CLICK_MS.
+#define BUTTON_LONG_PRESS_MS 500
 
 // ---------------------------------------------------------------------------
 // Piezo beeper, driven through an NPN transistor (e.g. 2N2222) as a low-side

@@ -58,9 +58,10 @@ bool longestDropped(PeerInfo &out);
 
 // Removes a dropped-off rider from the group ("aus der Gruppe werfen"): the
 // peer stops counting/showing/reminding, but its slot stays -- a heartbeat
-// from the same node re-adds it automatically (logged as ZURUECK). No-op if
-// the peer meanwhile came back on its own.
-void dismiss(uint16_t nodeId);
+// from the same node re-adds it automatically (logged as ZURUECK). Returns
+// false (and changes nothing) if the peer meanwhile came back on its own --
+// the UI words its toast accordingly.
+bool dismiss(uint16_t nodeId);
 
 // Looks up a peer's nickname for display; returns a fallback "#xxxx" string
 // (from a static buffer, valid until the next call) if the sender hasn't

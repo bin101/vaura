@@ -256,15 +256,17 @@ bool longestDropped(PeerInfo &out) {
   return bestIndex >= 0 && peerInfo(bestIndex, out);
 }
 
-void dismiss(uint16_t nodeId) {
+bool dismiss(uint16_t nodeId) {
   for (auto &p : peers) {
     // The droppedOff check makes this a no-op if the rider's heartbeat came
     // back between showing the prompt and the long press -- never silently
     // hide someone who is actually present.
     if (p.used && p.nodeId == nodeId && p.droppedOff) {
       p.dismissed = true;
+      return true;
     }
   }
+  return false;
 }
 
 const char *nicknameFor(uint16_t nodeId) {

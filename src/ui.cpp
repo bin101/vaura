@@ -144,8 +144,8 @@ uint32_t lastSeenAlertGeneration = 0;
 
 // Set by main.cpp right before each Ui::tick() so the idle screen can show
 // the battery percentage without ui.cpp depending on the power module
-// directly (Power::begin() needs the I2C bus up first, which main.cpp
-// sequences; ui.cpp shouldn't need to care about that ordering).
+// directly -- data flows one way (main.cpp polls Power, pushes here) instead
+// of adding a cross-module dependency.
 uint8_t batteryPercentForDisplay = 0;
 bool batteryAvailableForDisplay = false;
 bool batteryLowForDisplay = false;
@@ -621,19 +621,22 @@ void renderRangeTest() {
 // labels (4x6 font) baseline 50. Leaves the display in the 4x6 font --
 // callers draw their remaining text with an explicit setFont, as everywhere.
 void drawLevelRuler(uint8_t activeLevel) {
+  // The geometry (12 px tick spacing spanning x = 4..124 of the 128 px panel)
+  // is laid out for exactly the 11 steps 0..10 -- a different step count
+  // needs a new layout, not just a changed loop bound.
+  static_assert(FALLING_BACK_SENSITIVITY_MAX == 10, "ruler layout assumes steps 0..10");
   const int kFirstTickX = 4;
-  const int kTickSpacingPx = 12; // 11 ticks over x = 4..124
+  const int kTickSpacingPx = 12;
   display.drawHLine(kFirstTickX, 38, kTickSpacingPx * FALLING_BACK_SENSITIVITY_MAX + 1);
   display.setFont(u8g2_font_4x6_tf);
   for (uint8_t i = 0; i <= FALLING_BACK_SENSITIVITY_MAX; i++) {
     int x = kFirstTickX + kTickSpacingPx * i;
     display.drawVLine(x, 39, 4);
-    if (i < 10) {
-      char label[2] = {static_cast<char>('0' + i), '\0'};
-      display.drawStr(x - 1, 50, label); // 3 px glyph, centered under the tick
-    } else {
-      display.drawStr(x - 3, 50, "10"); // two glyphs, still ends left of x=128
-    }
+    char label[4];
+    snprintf(label, sizeof(label), "%u", i);
+    // Roughly centered under the tick: 3 px glyph -> 1 px left, "10" -> 3 px
+    // (its 7 px still end left of x = 128).
+    display.drawStr(x - (i < 10 ? 1 : 3), 50, label);
   }
   int cursorX = kFirstTickX + kTickSpacingPx * activeLevel;
   display.drawTriangle(cursorX - 3, 31, cursorX + 3, 31, cursorX, 36);
@@ -864,6 +867,16 @@ void tick() {
     enterIdle(); // keeps the rider -- the next reminder cycle will ask again
     needsRender = true;
   }
+  if (state == State::DismissPrompt) {
+    // Keep the prompt honest while it is open: refresh the candidate every
+    // tick so the "weg seit" age stays live, a rider who came back mid-prompt
+    // is replaced by the next-longest dropped one -- and if nobody is dropped
+    // anymore, the prompt closes itself instead of showing a stale name.
+    if (!Roster::longestDropped(dismissCandidate)) {
+      enterIdle();
+      needsRender = true;
+    }
+  }
 
   // A SCHWACH/ABRISS event is worth interrupting the rider for, even if the
   // display was asleep -- wake it exactly once per new such event.
@@ -1004,9 +1017,15 @@ void onButtonLongPress() {
     case State::IncomingWarning:
       break; // dismissed with a short click only, by design -- see onButtonClick()
     case State::DismissPrompt: {
-      Roster::dismiss(dismissCandidate.nodeId);
       char toast[24];
-      snprintf(toast, sizeof(toast), "%s entfernt", dismissCandidate.nickname);
+      if (Roster::dismiss(dismissCandidate.nodeId)) {
+        snprintf(toast, sizeof(toast), "%s entfernt", dismissCandidate.nickname);
+      } else {
+        // Heartbeat came back between prompt and long press -- dismiss() was
+        // a no-op, and claiming "entfernt" over a list that shows the rider
+        // alive would be a lie.
+        snprintf(toast, sizeof(toast), "%s ist zurueck", dismissCandidate.nickname);
+      }
       showToast(toast);
       enterIdle();
       break;
