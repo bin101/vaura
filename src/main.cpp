@@ -67,11 +67,14 @@ void sendHeartbeat() {
   Radio::send(buf, len);
 }
 
-void dispatchIncomingPacket() {
+// Returns true if a packet was dispatched, so the caller can drain a burst
+// (radio.cpp's RX path holds only one frame at a time -- see the comment in
+// loop() below).
+bool dispatchIncomingPacket() {
   Protocol::DecodedPacket pkt;
   int16_t rssi;
   if (!Radio::poll(pkt, rssi)) {
-    return;
+    return false;
   }
 
   switch (pkt.type) {
@@ -86,6 +89,7 @@ void dispatchIncomingPacket() {
       break;
     }
   }
+  return true;
 }
 } // namespace
 
@@ -106,6 +110,12 @@ void setup() {
   Radio::begin();
   Roster::begin();
 
+  // random() (used for heartbeat jitter, see randomizedHeartbeatInterval())
+  // is otherwise unseeded, so devices booted around the same time would draw
+  // the identical jitter sequence and never stop colliding on air. Seed from
+  // the hardware RNG, which is independent of Wi-Fi/BT state.
+  randomSeed(esp_random());
+
   button.attachClick(Ui::onButtonClick);
   button.attachLongPressStart(Ui::onButtonLongPress);
   button.attachDoubleClick(Ui::onButtonDoubleClick);
@@ -122,7 +132,11 @@ void setup() {
 void loop() {
   DeviceConfig::pollSerialConsole();
   button.tick();
-  dispatchIncomingPacket();
+  // Drain fully: radio.cpp's RX path holds only the single most-recently
+  // received frame, so a burst of heartbeats arriving between two loop()
+  // iterations would otherwise lose all but the last one.
+  while (dispatchIncomingPacket()) {
+  }
 
   uint32_t now = millis();
 
