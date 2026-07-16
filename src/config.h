@@ -186,7 +186,7 @@ static_assert((BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_S
 // wind can swallow the single long dropped-off tone). From the second
 // reminder on the UI also offers to remove the rider from the group -- see
 // ui.cpp.
-#define DROPPED_OFF_REMINDER_INTERVAL_MS 60000UL
+#define DROPPED_OFF_REMINDER_INTERVAL_MS 30000UL
 
 #define MAX_PEERS 16
 
