@@ -2,6 +2,7 @@
 
 #include <Preferences.h>
 
+#include "node_id.h"
 #include "protocol.h"
 #include "radio.h" // console channel changes apply immediately (applyChannel)
 
@@ -176,11 +177,11 @@ void handleLine(const String &lineIn) {
 } // namespace
 
 void begin() {
-  // Use the low 16 bits of the factory MAC as a compact, collision-resistant
-  // node id -- unique enough for a club-sized fleet without needing to
-  // provision anything by hand.
-  uint64_t mac = ESP.getEfuseMac();
-  cachedNodeId = static_cast<uint16_t>(mac & 0xFFFF);
+  // Derive a compact, collision-resistant node id from the factory MAC --
+  // unique enough for a club-sized fleet without needing to provision
+  // anything by hand. See node_id.h for why this isn't a plain `mac & 0xFFFF`
+  // (that grabs the vendor-constant OUI bytes, not the per-device ones).
+  cachedNodeId = nodeIdFromMac(ESP.getEfuseMac());
 
   if (!prefs.begin("warndevice", /*readOnly=*/false)) {
     // Everything below still works off the defaults; the put* calls will just
