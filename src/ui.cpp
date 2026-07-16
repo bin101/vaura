@@ -854,6 +854,13 @@ bool bootChannelPending() { return state == State::BootChannelSelect; }
 
 void begin() {
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  // Active I2C presence check: U8g2's display.begin() ignores whether the panel
+  // actually ACKs, so probe the address ourselves and log like Power::begin does
+  // for the INA219 -- otherwise a missing/mis-soldered OLED boots silently.
+  Wire.beginTransmission(OLED_I2C_ADDRESS);
+  if (Wire.endTransmission() != 0) {
+    Serial.println("Ui: OLED (SSD1306) not found on I2C -- display blank.");
+  }
   display.begin();
   // Boot starts on the channel selection, not on Idle -- confirming (or the
   // 10 s auto-confirm) is what releases the first heartbeat, see main.cpp.
