@@ -91,6 +91,13 @@ void dispatchIncomingPacket() {
 
 void setup() {
   Serial.begin(115200);
+  // TEMP DEBUG: XIAO's native USB-CDC drops early prints if the host terminal
+  // hasn't reattached yet after a reset. Bounded so a USB-less field boot
+  // (the common case) isn't delayed -- revert before merging.
+  uint32_t serialWaitStart = millis();
+  while (!Serial && millis() - serialWaitStart < 2000) {
+    delay(10);
+  }
   delay(300); // brief warm-up so early log lines aren't lost on cold boot
 
   DeviceConfig::begin();
