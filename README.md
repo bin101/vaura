@@ -142,7 +142,7 @@ Releases are **fully automatic** — there's no manual tagging step in the norma
 
 A maintainer can still push a tag by hand (`git tag vX.Y.Z && git push origin vX.Y.Z`) to trigger a one-off release outside this flow.
 
-**One-time setup for a new fork:** create a public GitHub repo and set the `GITHUB_REPO` constant in `flasher/flasher.py` from the placeholder to `user/repo` — before that, the app can only flash local files.
+**One-time setup for a new fork:** set the `GITHUB_REPO` constant in `flasher/flasher.py` to your fork's `user/repo`. Until your fork has published its first release, the flasher's "Download latest version" button reports "no releases found" — use "Local file ..." in the meantime.
 
 ## Provisioning (once per device)
 
