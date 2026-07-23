@@ -34,6 +34,11 @@ compile anything.
 
 ## Build, test, flash
 
+If the `pio` CLI isn't on PATH (e.g. a sandboxed/headless environment with no global PlatformIO
+Core install), use the project-local venv instead — `./.pio_venv/bin/pio` — which already has
+PlatformIO Core and the ESP32 platform packages installed; prefix every command below with that
+path in such environments:
+
 ```bash
 pio run                      # compile firmware
 pio run -t upload            # flash the USB-connected device
