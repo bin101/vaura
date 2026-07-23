@@ -66,6 +66,24 @@ double fullFrameTimeOnAirUs(size_t payloadLen) {
 void begin() {
   SPI.begin(PIN_LORA_SCK, PIN_LORA_MISO, PIN_LORA_MOSI, PIN_LORA_NSS);
 
+  // Presence probe before touching beginFSK() at all. RadioLib's own
+  // beginFSK() does detect a missing chip (via its internal findChip()), but
+  // only after retrying its own verified reset up to 10 times, each bounded
+  // ~1 s -- several seconds of the boot-time channel-select screen (see
+  // BootChannelSelect in ui.cpp) looking frozen before a merely-absent
+  // SX1262 is reported as non-fatal. Do the same verified reset once, up
+  // front, bounded to ~1 s, and skip beginFSK() entirely if the chip never
+  // answers. Mirrors the pin setup beginFSK() itself would do first (CS mode
+  // + idle-high, BUSY as input) so the probe is meaningful on its own.
+  loraModule.init();
+  pinMode(PIN_LORA_BUSY, INPUT);
+  int presence = radio.reset(/*verify=*/true);
+  if (presence != RADIOLIB_ERR_NONE) {
+    Serial.printf("Radio: SX1262 not found, code %d -- device continues without radio.\n",
+                   presence);
+    return;
+  }
+
   int state = radio.beginFSK(GFSK_FREQUENCY_MHZ, GFSK_BITRATE_KBPS, GFSK_FREQUENCY_DEVIATION_KHZ,
                               GFSK_RX_BANDWIDTH_KHZ, GFSK_TX_POWER_DBM, GFSK_PREAMBLE_LENGTH_BITS,
                               LORA_TCXO_VOLTAGE);
