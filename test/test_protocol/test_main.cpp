@@ -125,6 +125,143 @@ void test_reject_unknown_msg_type() {
   TEST_ASSERT_FALSE(Protocol::decode(buf, len, pkt));
 }
 
+void test_gossip_roundtrip_empty() {
+  uint8_t buf[Protocol::kMaxPacketLen];
+  size_t len = Protocol::encodeGossip(buf, 0xABCD, 3, nullptr, 0);
+  TEST_ASSERT_EQUAL_UINT(Protocol::kHeaderLen + 1, len); // header + count byte only
+
+  Protocol::DecodedPacket pkt;
+  TEST_ASSERT_TRUE(Protocol::decode(buf, len, pkt));
+  TEST_ASSERT_EQUAL(static_cast<int>(Protocol::MsgType::Gossip), static_cast<int>(pkt.type));
+  TEST_ASSERT_EQUAL_HEX16(0xABCD, pkt.senderId);
+  TEST_ASSERT_EQUAL_UINT8(3, pkt.seq);
+  TEST_ASSERT_EQUAL_UINT8(0, pkt.gossipCount);
+}
+
+void test_gossip_roundtrip_typical() {
+  const Protocol::GossipEntry entries[] = {
+      {0x1111, 0x2222, Protocol::GossipStatus::Weak, 3, 7},
+      {0x3333, 0x4444, Protocol::GossipStatus::Lost, 0, 255}, // ttl 0 = do not relay further
+  };
+  uint8_t buf[Protocol::kMaxPacketLen];
+  size_t len = Protocol::encodeGossip(buf, 0x9999, 1, entries, 2);
+  TEST_ASSERT_EQUAL_UINT(Protocol::kHeaderLen + 1 + 2 * Protocol::kGossipEntryWireLen, len);
+
+  Protocol::DecodedPacket pkt;
+  TEST_ASSERT_TRUE(Protocol::decode(buf, len, pkt));
+  TEST_ASSERT_EQUAL(static_cast<int>(Protocol::MsgType::Gossip), static_cast<int>(pkt.type));
+  TEST_ASSERT_EQUAL_UINT8(2, pkt.gossipCount);
+
+  TEST_ASSERT_EQUAL_HEX16(0x1111, pkt.gossipEntries[0].observerId);
+  TEST_ASSERT_EQUAL_HEX16(0x2222, pkt.gossipEntries[0].subjectId);
+  TEST_ASSERT_EQUAL(static_cast<int>(Protocol::GossipStatus::Weak),
+                     static_cast<int>(pkt.gossipEntries[0].status));
+  TEST_ASSERT_EQUAL_UINT8(3, pkt.gossipEntries[0].ttl);
+  TEST_ASSERT_EQUAL_UINT8(7, pkt.gossipEntries[0].seq);
+
+  TEST_ASSERT_EQUAL_HEX16(0x3333, pkt.gossipEntries[1].observerId);
+  TEST_ASSERT_EQUAL_HEX16(0x4444, pkt.gossipEntries[1].subjectId);
+  TEST_ASSERT_EQUAL(static_cast<int>(Protocol::GossipStatus::Lost),
+                     static_cast<int>(pkt.gossipEntries[1].status));
+  TEST_ASSERT_EQUAL_UINT8(0, pkt.gossipEntries[1].ttl);
+  TEST_ASSERT_EQUAL_UINT8(255, pkt.gossipEntries[1].seq);
+}
+
+// A pure encode-then-decode roundtrip cannot catch a bug where both sides
+// are consistently wrong in the same way (e.g. swapped byte order, a moved
+// bit position) -- pin the exact on-wire bytes for one known entry, the same
+// way test_reject_v1_heartbeat pins the heartbeat layout.
+void test_gossip_golden_bytes_pins_wire_layout() {
+  const Protocol::GossipEntry entries[] = {
+      {0xABCD, 0x0102, Protocol::GossipStatus::Lost, /*ttl=*/3, /*seq=*/42},
+  };
+  uint8_t buf[Protocol::kMaxPacketLen];
+  size_t len = Protocol::encodeGossip(buf, /*senderId=*/0x1234, /*seq=*/7, entries, 1);
+
+  const uint8_t expected[] = {
+      0xC9,       // magic
+      3,          // version (kVersion)
+      3,          // MsgType::Gossip
+      0x34, 0x12, // senderId 0x1234, little-endian
+      7,          // header seq
+      1,          // entry count
+      0xCD, 0xAB, // observerId 0xABCD, little-endian
+      0x02, 0x01, // subjectId 0x0102, little-endian
+      0x83,       // status(Lost=1)<<7 | ttl(3) == 0x80 | 0x03
+      42,         // entry seq
+  };
+  TEST_ASSERT_EQUAL_UINT(sizeof(expected), len);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, buf, sizeof(expected));
+
+  // Decoding the golden bytes must reproduce the same entry.
+  Protocol::DecodedPacket pkt;
+  TEST_ASSERT_TRUE(Protocol::decode(expected, sizeof(expected), pkt));
+  TEST_ASSERT_EQUAL_UINT8(1, pkt.gossipCount);
+  TEST_ASSERT_EQUAL_HEX16(0xABCD, pkt.gossipEntries[0].observerId);
+  TEST_ASSERT_EQUAL_HEX16(0x0102, pkt.gossipEntries[0].subjectId);
+  TEST_ASSERT_EQUAL(static_cast<int>(Protocol::GossipStatus::Lost),
+                     static_cast<int>(pkt.gossipEntries[0].status));
+  TEST_ASSERT_EQUAL_UINT8(3, pkt.gossipEntries[0].ttl);
+  TEST_ASSERT_EQUAL_UINT8(42, pkt.gossipEntries[0].seq);
+}
+
+// The status/ttl byte packs a 1-bit status into the top bit and a 4-bit ttl
+// into the low nibble -- exercise the ttl range that actually fits (0..15)
+// to pin down that packing, independent of the roundtrip test above.
+void test_gossip_ttl_nibble_range_roundtrips() {
+  for (uint8_t ttl = 0; ttl <= 15; ttl++) {
+    Protocol::GossipEntry entry{0x1234, 0x5678, Protocol::GossipStatus::Weak, ttl, 0};
+    uint8_t buf[Protocol::kMaxPacketLen];
+    size_t len = Protocol::encodeGossip(buf, 1, 0, &entry, 1);
+    Protocol::DecodedPacket pkt;
+    TEST_ASSERT_TRUE(Protocol::decode(buf, len, pkt));
+    TEST_ASSERT_EQUAL_UINT8(ttl, pkt.gossipEntries[0].ttl);
+  }
+}
+
+void test_gossip_roundtrip_max_entries() {
+  Protocol::GossipEntry entries[Protocol::kMaxGossipEntries];
+  for (size_t i = 0; i < Protocol::kMaxGossipEntries; i++) {
+    entries[i] = {static_cast<uint16_t>(0x1000 + i), static_cast<uint16_t>(0x2000 + i),
+                  (i % 2 == 0) ? Protocol::GossipStatus::Weak : Protocol::GossipStatus::Lost,
+                  static_cast<uint8_t>(i), static_cast<uint8_t>(i * 10)};
+  }
+  uint8_t buf[Protocol::kMaxPacketLen];
+  size_t len = Protocol::encodeGossip(buf, 1, 0, entries, static_cast<uint8_t>(Protocol::kMaxGossipEntries));
+  TEST_ASSERT_TRUE(len <= Protocol::kMaxPacketLen); // must actually fit in one packet
+
+  Protocol::DecodedPacket pkt;
+  TEST_ASSERT_TRUE(Protocol::decode(buf, len, pkt));
+  TEST_ASSERT_EQUAL_UINT8(Protocol::kMaxGossipEntries, pkt.gossipCount);
+  for (size_t i = 0; i < Protocol::kMaxGossipEntries; i++) {
+    TEST_ASSERT_EQUAL_HEX16(entries[i].observerId, pkt.gossipEntries[i].observerId);
+    TEST_ASSERT_EQUAL_HEX16(entries[i].subjectId, pkt.gossipEntries[i].subjectId);
+    TEST_ASSERT_EQUAL(static_cast<int>(entries[i].status), static_cast<int>(pkt.gossipEntries[i].status));
+    TEST_ASSERT_EQUAL_UINT8(entries[i].seq, pkt.gossipEntries[i].seq);
+  }
+}
+
+void test_reject_gossip_count_exceeds_max() {
+  uint8_t buf[Protocol::kMaxPacketLen];
+  size_t len = Protocol::encodeGossip(buf, 1, 0, nullptr, 0);
+  buf[Protocol::kHeaderLen] = static_cast<uint8_t>(Protocol::kMaxGossipEntries + 1); // claim more than could ever fit
+  Protocol::DecodedPacket pkt;
+  TEST_ASSERT_FALSE(Protocol::decode(buf, len, pkt));
+}
+
+void test_reject_gossip_short_buffer() {
+  const Protocol::GossipEntry entries[] = {
+      {0x1111, 0x2222, Protocol::GossipStatus::Weak, 3, 7},
+  };
+  uint8_t buf[Protocol::kMaxPacketLen];
+  size_t len = Protocol::encodeGossip(buf, 1, 0, entries, 1);
+  Protocol::DecodedPacket pkt;
+  for (size_t cut = 0; cut < len; cut++) {
+    TEST_ASSERT_FALSE(Protocol::decode(buf, cut, pkt));
+  }
+  TEST_ASSERT_TRUE(Protocol::decode(buf, len, pkt));
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_heartbeat_roundtrip);
@@ -137,5 +274,12 @@ int main(int, char **) {
   RUN_TEST(test_reject_v1_heartbeat);
   RUN_TEST(test_reject_short_buffer);
   RUN_TEST(test_reject_unknown_msg_type);
+  RUN_TEST(test_gossip_roundtrip_empty);
+  RUN_TEST(test_gossip_roundtrip_typical);
+  RUN_TEST(test_gossip_golden_bytes_pins_wire_layout);
+  RUN_TEST(test_gossip_ttl_nibble_range_roundtrips);
+  RUN_TEST(test_gossip_roundtrip_max_entries);
+  RUN_TEST(test_reject_gossip_count_exceeds_max);
+  RUN_TEST(test_reject_gossip_short_buffer);
   return UNITY_END();
 }
