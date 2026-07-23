@@ -947,6 +947,49 @@ void begin() {
   render();
 }
 
+// One entry per State that auto-returns to Idle (or a state-specific action,
+// see BootChannelSelect below) after a fixed duration with no interaction.
+// Replaces what used to be a hand-written if-chain in tick(): CLAUDE.md
+// warned that chain was a plain `if`-chain rather than a `switch`, so the
+// compiler couldn't flag a State value that should time out but doesn't yet
+// have an entry -- a table doesn't fix that (it's still just data), but it
+// does mean a new timed state is one row here instead of a copy-pasted
+// if-block easy to get subtly wrong (wrong variable, missed needsRender,
+// ...), and there is exactly one place to scan instead of eleven scattered
+// blocks. Idle/RangeTest/Charging are deliberately absent: Idle has nothing
+// to time out of, RangeTest never times out by design (see its own comment
+// in tick()), and Charging is handled by tick()'s own early return above
+// this table (see that comment) -- none of the three could ever reach this
+// loop with a real timeout to check anyway.
+struct TimeoutEntry {
+  State state;
+  uint32_t timeoutMs;
+  void (*onTimeout)(); // nullptr = the common case, enterIdle()
+};
+const TimeoutEntry kTimeouts[] = {
+    // Unattended reboot (battery brownout mid-ride): auto-confirm whatever
+    // channel is shown -- untouched, that is the persisted channel. The
+    // countdown resets on every click, so a touched-but-abandoned selection
+    // had 10 s on screen with "Start in Ns" before it wins.
+    {State::BootChannelSelect, BOOT_CHANNEL_SELECT_TIMEOUT_MS, confirmBootChannel},
+    {State::Menu, UI_MENU_TIMEOUT_MS, nullptr},
+    {State::IncomingWarning, UI_INCOMING_DISPLAY_MS, nullptr},
+    // Abandons the edit -- nothing is saved until the last position is confirmed.
+    {State::Rename, UI_RENAME_TIMEOUT_MS, nullptr},
+    {State::SettingsMenu, UI_MENU_TIMEOUT_MS, nullptr},
+    // Abandons the change -- nothing is saved until confirmed with a long press.
+    {State::ToneMenu, UI_RENAME_TIMEOUT_MS, nullptr},
+    {State::DisplayMenu, UI_RENAME_TIMEOUT_MS, nullptr},
+    {State::SensitivityMenu, UI_RENAME_TIMEOUT_MS, nullptr},
+    {State::ChannelMenu, UI_RENAME_TIMEOUT_MS, nullptr},
+    {State::StatsScreen, UI_MENU_TIMEOUT_MS, nullptr},
+    // Keeps the rider -- the next reminder cycle will ask again. The prompt's
+    // OTHER special behavior (refreshing the candidate every tick while it's
+    // open) is intentionally not a timeout and stays as its own check further
+    // down in tick(), not folded into this table.
+    {State::DismissPrompt, UI_INCOMING_DISPLAY_MS, nullptr},
+};
+
 void tick() {
   uint32_t now = millis();
 
@@ -984,54 +1027,18 @@ void tick() {
 
   bool needsRender = false;
 
-  if (state == State::BootChannelSelect && now - stateEnteredMs > BOOT_CHANNEL_SELECT_TIMEOUT_MS) {
-    // Unattended reboot (battery brownout mid-ride): auto-confirm whatever is
-    // shown -- untouched, that is the persisted channel. The countdown resets
-    // with every click, so a touched-but-abandoned selection had 10 s on
-    // screen with "Start in Ns" before it wins.
-    confirmBootChannel();
-    needsRender = true;
+  for (const TimeoutEntry &entry : kTimeouts) {
+    if (state == entry.state && now - stateEnteredMs > entry.timeoutMs) {
+      if (entry.onTimeout != nullptr) {
+        entry.onTimeout();
+      } else {
+        enterIdle();
+      }
+      needsRender = true;
+      break; // state (and stateEnteredMs) just changed -- no other entry can also match now
+    }
   }
-  if (state == State::Menu && now - stateEnteredMs > UI_MENU_TIMEOUT_MS) {
-    enterIdle();
-    needsRender = true;
-  }
-  if (state == State::IncomingWarning && now - stateEnteredMs > UI_INCOMING_DISPLAY_MS) {
-    enterIdle();
-    needsRender = true;
-  }
-  if (state == State::Rename && now - stateEnteredMs > UI_RENAME_TIMEOUT_MS) {
-    enterIdle(); // abandons the edit -- nothing is saved until the last position is confirmed
-    needsRender = true;
-  }
-  if (state == State::SettingsMenu && now - stateEnteredMs > UI_MENU_TIMEOUT_MS) {
-    enterIdle();
-    needsRender = true;
-  }
-  if (state == State::ToneMenu && now - stateEnteredMs > UI_RENAME_TIMEOUT_MS) {
-    enterIdle(); // abandons the change -- nothing is saved until confirmed with a long press
-    needsRender = true;
-  }
-  if (state == State::DisplayMenu && now - stateEnteredMs > UI_RENAME_TIMEOUT_MS) {
-    enterIdle(); // abandons the change -- nothing is saved until confirmed with a long press
-    needsRender = true;
-  }
-  if (state == State::SensitivityMenu && now - stateEnteredMs > UI_RENAME_TIMEOUT_MS) {
-    enterIdle(); // abandons the change -- nothing is saved until confirmed with a long press
-    needsRender = true;
-  }
-  if (state == State::ChannelMenu && now - stateEnteredMs > UI_RENAME_TIMEOUT_MS) {
-    enterIdle(); // abandons the change -- nothing is saved until confirmed with a long press
-    needsRender = true;
-  }
-  if (state == State::StatsScreen && now - stateEnteredMs > UI_MENU_TIMEOUT_MS) {
-    enterIdle();
-    needsRender = true;
-  }
-  if (state == State::DismissPrompt && now - stateEnteredMs > UI_INCOMING_DISPLAY_MS) {
-    enterIdle(); // keeps the rider -- the next reminder cycle will ask again
-    needsRender = true;
-  }
+
   if (state == State::DismissPrompt) {
     // Keep the prompt honest while it is open: refresh the candidate every
     // tick so the "weg seit" age stays live, a rider who came back mid-prompt
