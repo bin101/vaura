@@ -90,7 +90,19 @@ Peer *findOrCreate(uint16_t nodeId) {
     }
   }
   if (free_slot == nullptr) {
-    return nullptr; // roster full -- silently ignore, MAX_PEERS is generous for club rides
+    // Roster full -- MAX_PEERS is generous for a club ride, and slots are
+    // never released (see the comment above), so this can only happen with
+    // an unusually large or long-lived group. Still worth one log line: this
+    // is a safety-relevant device, and a rider beyond the cap would otherwise
+    // go completely untracked/unalerted with no trace at all. Logged once
+    // per boot (not once per dropped heartbeat) so a sustained overflow
+    // doesn't spam the serial console.
+    static bool warnedFull = false;
+    if (!warnedFull) {
+      warnedFull = true;
+      Serial.println("Roster: full (MAX_PEERS reached) -- further new peers won't be tracked until the next boot.");
+    }
+    return nullptr;
   }
   // Reset every field, not just the flags: slots are never released today,
   // but if eviction is ever added, a reused slot must not inherit the previous
