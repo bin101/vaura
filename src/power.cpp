@@ -34,7 +34,17 @@ void refreshIfDue() {
     return;
   }
   float busVoltage = ina219.getBusVoltage_V(); // load-side voltage ~= battery voltage
-  lastMillivolts = static_cast<uint16_t>(busVoltage * 1000.0f);
+  // Sanity-clamp before the uint16_t cast: a glitched/negative I2C read (bad
+  // bus, brownout) would otherwise wrap silently into a nonsensical value
+  // (e.g. a negative reading wraps to ~65000 mV) that then propagates into
+  // the battery display, the low-battery latch, AND -- via the heartbeat --
+  // every peer's view of this rider's battery. A single-cell LiPo on this
+  // board never legitimately exceeds ~4.3 V; 5.0 V is a generous ceiling.
+  // Out-of-range readings simply keep the last known-good value rather than
+  // being trusted.
+  if (busVoltage >= 0.0f && busVoltage <= 5.0f) {
+    lastMillivolts = static_cast<uint16_t>(busVoltage * 1000.0f);
+  }
   // Adafruit_INA219::begin() calibrates for 32V/2A internally (see init()),
   // so getCurrent_mA() works out of the box -- no extra setCalibration_*()
   // needed for the small currents a USB charger delivers here.

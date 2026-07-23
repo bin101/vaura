@@ -165,12 +165,27 @@ void handleLine(const String &lineIn) {
     // drive -- the one thing worth tuning here is the frequency, since a
     // piezo is loudest right at its mechanical resonance. Play a fixed test
     // duration so repeated "beep <Hz>" calls are directly comparable by ear.
-    unsigned int freq = arg.length() == 0 ? beepFrequencyHz() : static_cast<unsigned int>(arg.toInt());
-    if (freq == 0) {
-      Serial.println(F("Error: invalid frequency."));
-    } else {
+    // Range-checked as a `long` before any cast to an unsigned type: unlike
+    // the persisted `tone` setting (which only ever comes from the fixed
+    // BEEP_FREQUENCY_MIN/MAX_HZ ruler), this is free-form test input, and
+    // toInt()'s raw result can be negative or huge (e.g. "beep -5" or
+    // "beep 999999") -- both would otherwise slip past a plain `== 0` check
+    // once cast to unsigned int.
+    constexpr long kMinTestHz = 100;
+    constexpr long kMaxTestHz = 10000;
+    if (arg.length() == 0) {
+      unsigned int freq = beepFrequencyHz();
       Serial.printf("Beeping at %u Hz...\n", freq);
       tone(PIN_PIEZO, freq, 600);
+    } else {
+      long freqArg = arg.toInt();
+      if (freqArg < kMinTestHz || freqArg > kMaxTestHz) {
+        Serial.printf("Error: expected a frequency between %ld and %ld Hz.\n", kMinTestHz, kMaxTestHz);
+      } else {
+        unsigned int freq = static_cast<unsigned int>(freqArg);
+        Serial.printf("Beeping at %u Hz...\n", freq);
+        tone(PIN_PIEZO, freq, 600);
+      }
     }
   } else if (lower.equals("charge")) {
     // Not part of `status` -- this is a one-time hardware calibration aid
@@ -179,8 +194,12 @@ void handleLine(const String &lineIn) {
     Serial.printf("chargeCurrentMa=%d  isCharging=%s  batteryMv=%u\n",
                   Power::chargeCurrentMilliamps(), Power::isCharging() ? "yes" : "no",
                   Power::batteryMillivolts());
+    // INA219_CURRENT_CHARGE_SIGN is currently -1 (see config.h), so a
+    // correctly-wired board reads chargeCurrentMa POSITIVE while actually
+    // charging. If it reads negative instead, this board's IN+/IN- ended up
+    // the other way round -- flip the sign to +1, not -1 (it's already -1).
     Serial.println(F("If chargeCurrentMa reads negative while actually charging, flip"));
-    Serial.println(F("INA219_CURRENT_CHARGE_SIGN in config.h to -1."));
+    Serial.println(F("INA219_CURRENT_CHARGE_SIGN in config.h to +1 (it is currently -1)."));
   } else {
     Serial.println(F("Unknown command. 'help' for an overview."));
   }

@@ -81,7 +81,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r flasher/requirements.txt pyinstaller
+        run: pip install -r flasher/requirements.txt "pyinstaller>=6.0,<7"
 
       - name: Smoke test (imports + port scan, no GUI)
         run: python flasher/flasher.py --check

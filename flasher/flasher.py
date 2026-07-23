@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -27,8 +28,10 @@ import certifi
 # ---------------------------------------------------------------------------
 # GitHub repo (public) whose releases the flasher downloads firmware from --
 # format "user/repo". Update this if you fork the project under a different
-# repo; while it points to a nonexistent/placeholder repo, only "Local
-# file ..." works (the download button explains that then).
+# repo. If the repo has no releases yet (e.g. right after forking, before
+# the auto-tag/release pipeline has produced one), fetch_latest_release()
+# surfaces a clear "no releases yet" message -- "Local file ..." always
+# works regardless.
 # ---------------------------------------------------------------------------
 GITHUB_REPO = "bin101/vaura"
 
@@ -168,17 +171,60 @@ def list_serial_ports():
     return ports
 
 
+def build_port_labels(ports):
+    """[(device, description, likely), ...] (see list_serial_ports()) ->
+    (combobox values, the label to preselect (or None), {label: device}).
+
+    Pulled out of the GUI so the label<->device mapping is a plain, testable
+    function: the label is decorative (adds "(description)" and a "likely"
+    marker for display) but selected_port() must always be able to recover
+    the *real* port string from whichever label ends up selected."""
+    values, preselect = [], None
+    port_by_label = {}
+    for device, desc, likely in ports:
+        label = f"{device}  ({desc})" if desc else device
+        if likely:
+            label += "  ← likely the Vaura device"
+            preselect = preselect or label
+        port_by_label[label] = device
+        values.append(label)
+    return values, preselect, port_by_label
+
+
+def label_to_port(label, port_by_label):
+    """Recovers the actual port device string a refresh_ports()-built combobox
+    label stands for. Prefers the label->device map built alongside the same
+    labels (build_port_labels()); falls back to splitting on the description's
+    opening "  (" for a label not in the map (e.g. one left over from before
+    the last refresh). The fallback alone is not enough on its own: a "likely"
+    label for a device with no description (e.g. "COM3  ← likely the Vaura
+    device") has no "  (" to split on at all, so without the map lookup this
+    would return the whole label -- including the arrow suffix -- instead of
+    the port."""
+    if label in port_by_label:
+        return port_by_label[label]
+    return label.split("  (")[0].strip()
+
+
 def fetch_latest_release():
     """(tag, download_url) of the latest release, raises on errors."""
-    if "YOUR-GITHUB-USER" in GITHUB_REPO:
-        raise RuntimeError(
-            "flasher.py has no GitHub repo configured yet (GITHUB_REPO).\n"
-            "Use 'Local file ...' or set the constant."
-        )
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
     req = urllib.request.Request(url, headers={"User-Agent": APP_TITLE})
-    with urllib.request.urlopen(req, timeout=15, context=SSL_CONTEXT) as resp:
-        release = json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=SSL_CONTEXT) as resp:
+            release = json.load(resp)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            # GitHub returns 404 both for a nonexistent repo and for one with
+            # zero releases yet (a fresh fork before its first release) --
+            # either way, "Local file ..." is the only option until that
+            # changes.
+            raise RuntimeError(
+                f"No releases found for '{GITHUB_REPO}' (HTTP 404). If you "
+                "forked this project, set GITHUB_REPO in flasher.py to your "
+                "fork once it has a release. Use 'Local file ...' for now."
+            ) from e
+        raise
     for asset in release.get("assets", []):
         if asset.get("name") == FIRMWARE_ASSET_NAME:
             return release.get("tag_name", "?"), asset["browser_download_url"]
@@ -374,6 +420,7 @@ class FlasherApp:
         self.firmware_label_text = None
         self.busy = False
         self.msg_queue = queue.Queue()
+        self._port_by_label = {}  # populated by refresh_ports(), see selected_port()
 
         root.title(APP_TITLE)
         root.minsize(560, 640)
@@ -524,13 +571,7 @@ class FlasherApp:
 
     def refresh_ports(self):
         ports = list_serial_ports()
-        values, preselect = [], None
-        for device, desc, likely in ports:
-            label = f"{device}  ({desc})" if desc else device
-            if likely:
-                label += "  ← likely the Vaura device"
-                preselect = preselect or label
-            values.append(label)
+        values, preselect, self._port_by_label = build_port_labels(ports)
         self.cmb_port["values"] = values
         current = self.port_var.get()
         if preselect:
@@ -540,7 +581,7 @@ class FlasherApp:
         self.update_buttons()
 
     def selected_port(self):
-        return self.port_var.get().split("  (")[0].strip()
+        return label_to_port(self.port_var.get(), self._port_by_label)
 
     # --- Actions -------------------------------------------------------------
     def on_pick_file(self):

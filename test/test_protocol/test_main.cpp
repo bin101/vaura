@@ -125,6 +125,24 @@ void test_reject_unknown_msg_type() {
   TEST_ASSERT_FALSE(Protocol::decode(buf, len, pkt));
 }
 
+void test_reject_unknown_warning_type() {
+  // A well-formed Warning packet whose type byte is out of WarningType's
+  // range (0 and 6+ are unassigned) must be rejected at decode, not let
+  // through to degrade later at display time (warningLabel()'s "?").
+  uint8_t buf[Protocol::kMaxPacketLen];
+  size_t len = Protocol::encodeWarning(buf, 1, 0, Protocol::WarningType::CarBehind);
+  Protocol::DecodedPacket pkt;
+
+  buf[Protocol::kHeaderLen] = 0; // below WarningType::CarBehind (1)
+  TEST_ASSERT_FALSE(Protocol::decode(buf, len, pkt));
+
+  buf[Protocol::kHeaderLen] = static_cast<uint8_t>(Protocol::WarningType::Attention) + 1; // above the last type
+  TEST_ASSERT_FALSE(Protocol::decode(buf, len, pkt));
+
+  buf[Protocol::kHeaderLen] = 0xFF;
+  TEST_ASSERT_FALSE(Protocol::decode(buf, len, pkt));
+}
+
 void test_gossip_roundtrip_empty() {
   uint8_t buf[Protocol::kMaxPacketLen];
   size_t len = Protocol::encodeGossip(buf, 0xABCD, 3, nullptr, 0);
@@ -274,6 +292,7 @@ int main(int, char **) {
   RUN_TEST(test_reject_v1_heartbeat);
   RUN_TEST(test_reject_short_buffer);
   RUN_TEST(test_reject_unknown_msg_type);
+  RUN_TEST(test_reject_unknown_warning_type);
   RUN_TEST(test_gossip_roundtrip_empty);
   RUN_TEST(test_gossip_roundtrip_typical);
   RUN_TEST(test_gossip_golden_bytes_pins_wire_layout);
