@@ -111,7 +111,22 @@ bool decode(const uint8_t *data, size_t len, DecodedPacket &result) {
       if (len < kHeaderLen + 1) {
         return false;
       }
-      result.warningType = static_cast<WarningType>(data[kHeaderLen]);
+      uint8_t rawType = data[kHeaderLen];
+      // Reject an out-of-enum byte outright rather than letting it flow
+      // through as an unrecognized WarningType that only degrades late, at
+      // display time, to warningLabel()'s "?" fallback -- MsgType's own
+      // unknown-value case is rejected the same way just below.
+      switch (static_cast<WarningType>(rawType)) {
+        case WarningType::CarBehind:
+        case WarningType::HazardAhead:
+        case WarningType::Stopping:
+        case WarningType::Regroup:
+        case WarningType::Attention:
+          break;
+        default:
+          return false;
+      }
+      result.warningType = static_cast<WarningType>(rawType);
       return true;
     }
     case MsgType::Gossip: {

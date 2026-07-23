@@ -165,12 +165,27 @@ void handleLine(const String &lineIn) {
     // drive -- the one thing worth tuning here is the frequency, since a
     // piezo is loudest right at its mechanical resonance. Play a fixed test
     // duration so repeated "beep <Hz>" calls are directly comparable by ear.
-    unsigned int freq = arg.length() == 0 ? beepFrequencyHz() : static_cast<unsigned int>(arg.toInt());
-    if (freq == 0) {
-      Serial.println(F("Error: invalid frequency."));
-    } else {
+    // Range-checked as a `long` before any cast to an unsigned type: unlike
+    // the persisted `tone` setting (which only ever comes from the fixed
+    // BEEP_FREQUENCY_MIN/MAX_HZ ruler), this is free-form test input, and
+    // toInt()'s raw result can be negative or huge (e.g. "beep -5" or
+    // "beep 999999") -- both would otherwise slip past a plain `== 0` check
+    // once cast to unsigned int.
+    constexpr long kMinTestHz = 100;
+    constexpr long kMaxTestHz = 10000;
+    if (arg.length() == 0) {
+      unsigned int freq = beepFrequencyHz();
       Serial.printf("Beeping at %u Hz...\n", freq);
       tone(PIN_PIEZO, freq, 600);
+    } else {
+      long freqArg = arg.toInt();
+      if (freqArg < kMinTestHz || freqArg > kMaxTestHz) {
+        Serial.printf("Error: expected a frequency between %ld and %ld Hz.\n", kMinTestHz, kMaxTestHz);
+      } else {
+        unsigned int freq = static_cast<unsigned int>(freqArg);
+        Serial.printf("Beeping at %u Hz...\n", freq);
+        tone(PIN_PIEZO, freq, 600);
+      }
     }
   } else if (lower.equals("charge")) {
     // Not part of `status` -- this is a one-time hardware calibration aid
