@@ -25,4 +25,19 @@ uint8_t batteryPercent();
 // doesn't flap while the voltage bounces under load.
 bool isLow();
 
+// Charge current in mA, sign-normalized so positive means "flowing into the
+// battery" (see config.h's INA219_CURRENT_CHARGE_SIGN -- the raw sign
+// depends on which way the INA219's IN+/IN- ended up soldered, and must be
+// confirmed on real hardware). Cached alongside batteryMillivolts() in the
+// same BATTERY_READ_INTERVAL_MS-throttled I2C read. 0 if no INA219 was found.
+int16_t chargeCurrentMilliamps();
+
+// True while the battery is actively being charged, decided from the charge
+// current with hysteresis and a minimum dwell time (see charging_decision.h)
+// so a tapering charge current near "full" doesn't flap the device in and
+// out of charging mode. Always false when no INA219 is fitted -- a
+// battery-less test device on USB power draws no charge current and
+// therefore never reports charging, staying in ordinary operation.
+bool isCharging();
+
 } // namespace Power

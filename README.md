@@ -32,11 +32,11 @@ Matches the case author's build 1:1 — **no new wiring needed** if you followed
 5. **Piezo beeper** (via NPN transistor as a low-side switch, e.g. 2N2222 — the GPIO can't source enough current for the piezo directly):
    - Piezo (+) → **3V3**
    - Piezo (−) → transistor **collector**
-   - Transistor **base** → 1 kΩ resistor → **D1 / GPIO2** — **this resistor is not optional:** without it, the base-emitter junction (a diode with ~0.6–0.7 V forward voltage) sits practically directly on the 3.3 V GPIO with no current limiting. That can exceed the GPIO pin's maximum allowed output current and damage it.
-   - Transistor **base** → additionally a 10 kΩ resistor → **GND** (pull-down, prevents a random beep at boot). Unlike GPIO3, GPIO2 is **not** an ESP32-S3 strapping pin (see box below) — this pull-down is purely a nicety here, not a requirement.
+   - Transistor **base** → 1 kΩ resistor → **D0 / GPIO1** — **this resistor is not optional:** without it, the base-emitter junction (a diode with ~0.6–0.7 V forward voltage) sits practically directly on the 3.3 V GPIO with no current limiting. That can exceed the GPIO pin's maximum allowed output current and damage it.
+   - Transistor **base** → additionally a 10 kΩ resistor → **GND** (pull-down, prevents a random beep at boot). Unlike GPIO3, GPIO1 is **not** an ESP32-S3 strapping pin (see box below) — this pull-down is purely a nicety here, not a requirement.
    - Transistor **emitter** → **GND**
    - No flyback diode needed (only relevant for inductive loads like relays/motors; a piezo is capacitive).
-   - **Why D1/GPIO2 and not D2/GPIO3:** GPIO3 is one of the ESP32-S3's strapping pins (controls the JTAG signal source at boot) and has **no** internal pull resistor of its own — anything wired externally to GPIO3 counts as part of the boot-strapping circuit. GPIO2 has no such special role, making it the simpler choice for a piezo that just needs to switch on and off.
+   - **Why D0/GPIO1 and not D2/GPIO3:** GPIO3 is one of the ESP32-S3's strapping pins (controls the JTAG signal source at boot) and has **no** internal pull resistor of its own — anything wired externally to GPIO3 counts as part of the boot-strapping circuit. GPIO1 has no such special role, making it a safe choice for a piezo that just needs to switch on and off. (The build was originally wired to D1/GPIO2 — also strapping-pin-free — then moved to D0/GPIO1 after a soldering mistake on the physical board; either pin works equally well.)
    - **Watch the pinout:** "2N2222" is not a single standardized pinout — PN2222A (TO-92) is usually E-B-C, while P2N2222A (TO-92) is C-B-E, left to right with the flat side facing you. Check the exact print on your own part before soldering, or verify with an hFE transistor tester socket on a multimeter.
 6. **Build order:** solder all wires to the XIAO first, **then** glue components into the case (hot glue) — not the other way around, or you can no longer reach the solder pads.
 
@@ -47,7 +47,7 @@ LoRa SPI:      SCK=GPIO7   MISO=GPIO8   MOSI=GPIO9   NSS=GPIO41
 LoRa control:  DIO1=GPIO39  RESET=GPIO42  BUSY=GPIO40  ANT_SW=GPIO38
 I2C (OLED+INA219): SDA=GPIO5  SCL=GPIO6
 Button:        GPIO4 (D3), against GND, internal pull-up
-Piezo beeper:  GPIO2 (D1), via NPN transistor (1kΩ base, 10kΩ pull-down)
+Piezo beeper:  GPIO1 (D0), via NPN transistor (1kΩ base, 10kΩ pull-down)
 ```
 
 These pins belong to the B2B "kit" (Wio-SX1262 plugged on) — **not** to the separately available Wio-SX1262 solder-in board, which uses different pins.
@@ -62,7 +62,7 @@ Before gluing anything into the case, a loose breadboard build is worth it — p
 4. **OLED (SSD1306):** VCC → plus rail, GND → minus rail, SDA → GPIO5, SCL → GPIO6.
 5. **INA219:** VCC → plus rail, GND → minus rail, SDA → GPIO5 (same I²C bus, parallel to the OLED), SCL → GPIO6. **Vin+/Vin−** stay open without a battery (or bridged with a wire) — the firmware still detects the INA219 over I²C and simply shows `0` or a meaningless voltage; that's normal and not a bug for this first test without a battery.
 6. **Button:** one leg to the minus rail (GND), the other to GPIO4 (D3).
-7. **Piezo beeper:** transistor base via 1 kΩ to GPIO2 (D1), plus 10 kΩ from the base to the minus rail, emitter to the minus rail, collector to piezo (−), piezo (+) to the plus rail (see "Build plan" above for the full explanation including the pinout caveat).
+7. **Piezo beeper:** transistor base via 1 kΩ to GPIO1 (D0), plus 10 kΩ from the base to the minus rail, emitter to the minus rail, collector to piezo (−), piezo (+) to the plus rail (see "Build plan" above for the full explanation including the pinout caveat).
 8. **BAT+/BAT− on the XIAO stay completely unconnected** as long as no battery is being tested.
 
 This already lets you fully test the display, button, naming, and LoRa send/receive — only the battery display won't show a meaningful value until a real battery is connected. The full test from the [Verification](#verification) section (drop-off detection etc.) needs at least two devices built this way, as described there, each on its own USB port.
@@ -71,7 +71,7 @@ Once the breadboard test succeeds, a battery can optionally be added (battery(+)
 
 ### Reserved for later (not populated)
 
-GPIO1 (D0, ADC-capable) and GPIO43/44 (D6/D7) stay free — room for extra buttons or a vibration motor in a later expansion stage, without touching the existing wiring. (GPIO2/D1 is now taken by the piezo beeper, see above. GPIO3/D2 deliberately left free/unconnected — strapping pin, see build plan.)
+GPIO2 (D1, freed up after the piezo beeper moved to D0, see above) and GPIO43/44 (D6/D7) stay free — room for extra buttons or a vibration motor in a later expansion stage, without touching the existing wiring. (GPIO1/D0 is now taken by the piezo beeper. GPIO3/D2 deliberately left free/unconnected — strapping pin, see build plan.)
 
 ## Building & flashing the firmware
 
@@ -226,6 +226,25 @@ The OLED automatically turns off after an adjustable period of inactivity — de
 
 **Important:** if the display is currently off, the **first** button press (short or long) only wakes it, but triggers **no action** — so you never blindly send a warning or blindly open settings. Only the next press operates the menu normally.
 
+### USB charging mode (power saving while plugged in)
+
+When the INA219 senses real charge current flowing **into the battery** — not merely USB power
+being present — the device switches to a dedicated charging screen and drops everything else it can
+to save power: radio, heartbeat, gossip and roster are all suspended, and the CPU is downclocked.
+The screen shows battery percent, voltage, charge current, and your nickname. It sleeps after a
+fixed **10 s** regardless of your normal Display setting (even "Never"), and any button press
+reactivates it for another 10 s — same wake behavior as the idle screen, just on its own timer. The
+emergency double click is disabled while charging (the radio is asleep, so there's nothing to send
+it over anyway). Unplugging (or the charge current tapering off once the battery is full) returns
+the device to normal operation within a few seconds.
+
+**A test device with no battery fitted, powered only from USB, never enters this mode** — no
+battery means no charge current, so it stays in ordinary operation the whole time.
+
+The current-sense polarity depends on which way the INA219 ended up soldered and must be verified
+once per device design: use the serial console's `charge` command while actually charging. If
+`chargeCurrentMa` reads negative, flip `INA219_CURRENT_CHARGE_SIGN` in `src/config.h` to `-1`.
+
 ### Idle screen: who's here, who's falling back?
 
 The idle screen lists the riders directly, **weakest signal first** — the riders this device exists for are always visible at the top. The status lives in the name itself: `(NAME)` = dropped off — parenthesized like an absentee, always sorted to the very top; `!NAME!` = currently falling back (the same criterion as the falling-back beep, exclamation marks as an active warning), ` NAME` = all good. The header shows `active/total` **including yourself** (two riders out together = `2/2`) and your own battery level. On the two-tone panel, the header glows yellow (top 16 pixel rows); the rider list deliberately starts right below that color boundary.
@@ -319,6 +338,7 @@ With **at least 2 devices**:
 10. **Sensitivity**: set it to level 10 and put one device in another room → `WEAK` comes noticeably earlier than at level 5; at level 0, `WEAK` no longer occurs at all, only the drop-off.
 11. **Stats** (Settings) → ride time is running, warning/drop-off counters match the previous test steps.
 12. Only once these steps work on the table, test in the field (a real ride) — that's what the **range test** (Settings → Test) is for: read the actual GFSK range live over the distances relevant in a group ride (the ~400–600 m is a datasheet estimate, not a field measurement), and fine-tune the heartbeat interval/RSSI thresholds as needed.
+13. **USB charging mode**: plug a device with a battery fitted into USB power → within a few seconds the charging screen appears (battery %, voltage, charge current, your name), the other device shows this one `DROPPED` shortly after (radio is suspended). Confirm the sensed current with `charge` on the console — flip `INA219_CURRENT_CHARGE_SIGN` in `src/config.h` if it reads negative while charging. Wait 10 s → the screen goes dark; press the button → it comes back for another 10 s. Unplug → the device rejoins the group (`BACK`) within a few seconds. Repeat with a **battery-less** test device on USB power only → it must stay in normal operation the whole time, never showing the charging screen.
 
 ## Open items for later
 

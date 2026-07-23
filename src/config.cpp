@@ -3,6 +3,7 @@
 #include <Preferences.h>
 
 #include "node_id.h"
+#include "power.h" // `charge` console command reads the raw INA219 charge current
 #include "protocol.h"
 #include "radio.h" // console channel changes apply immediately (applyChannel)
 
@@ -48,6 +49,7 @@ void printHelp() {
   Serial.println(F("tone <0-10>              Set piezo tone level (plays a test beep)"));
   Serial.println(F("display <0|15|30|60|300> Display auto-off in seconds (0 = never)"));
   Serial.println(F("beep [Hz]                Play a test tone, e.g.: beep 3200 (no Hz: current frequency)"));
+  Serial.println(F("charge                   Show raw charge current -- for charging-mode calibration"));
   Serial.println(F("help                     Show this help"));
 }
 
@@ -170,6 +172,15 @@ void handleLine(const String &lineIn) {
       Serial.printf("Beeping at %u Hz...\n", freq);
       tone(PIN_PIEZO, freq, 600);
     }
+  } else if (lower.equals("charge")) {
+    // Not part of `status` -- this is a one-time hardware calibration aid
+    // (see config.h's INA219_CURRENT_CHARGE_SIGN comment), not a persisted
+    // setting the flasher's settings panel needs to know about.
+    Serial.printf("chargeCurrentMa=%d  isCharging=%s  batteryMv=%u\n",
+                  Power::chargeCurrentMilliamps(), Power::isCharging() ? "yes" : "no",
+                  Power::batteryMillivolts());
+    Serial.println(F("If chargeCurrentMa reads negative while actually charging, flip"));
+    Serial.println(F("INA219_CURRENT_CHARGE_SIGN in config.h to -1."));
   } else {
     Serial.println(F("Unknown command. 'help' for an overview."));
   }

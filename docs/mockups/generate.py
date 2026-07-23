@@ -253,4 +253,14 @@ b += text(0, 46, "DROPPED  40s ago", size=8)
 b += text(0, 61, "short=rider long=exit", size=8)
 write("range-test-dropped", b)
 
+# --- 20. Charging screen -----------------------------------------------------
+# "USB" text badge, not an icon -- a hand-drawn vector glyph (originally a
+# two-triangle lightning bolt) didn't render cleanly at this resolution on
+# the real two-tone panel, see renderCharging() in ui.cpp.
+b = header("Charging", right="USB")
+b += text(0, 34, "72%", size=13, weight="bold")
+b += text(0, 46, "3.92V  420mA", size=8)
+b += text(0, 61, "ROB", size=8)
+write("charging", b)
+
 print("done, ", len(os.listdir(OUT_DIR)), "files")

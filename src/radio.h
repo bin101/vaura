@@ -30,4 +30,12 @@ bool poll(Protocol::DecodedPacket &pkt, int16_t &rssi);
 // callers should treat that as "try again shortly", not a hard error.
 bool send(uint8_t *data, size_t len);
 
+// Suspends the radio into standby (RX-complete interrupt disarmed) to save
+// power while charging (see main.cpp). Configuration -- sync word, CRC, data
+// shaping -- is retained; resume() just re-arms RX, no re-init needed.
+void sleep();
+
+// Leaves standby and resumes listening -- undoes sleep().
+void resume();
+
 } // namespace Radio

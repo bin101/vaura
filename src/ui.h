@@ -22,6 +22,14 @@ bool bootChannelPending();
 // of a misleading "0%"); `low` going true wakes the display once and beeps.
 void setBatteryStatusForDisplay(uint8_t percent, bool available, bool low);
 
+// Pushed by main.cpp from Power::isCharging() (and, while charging, with
+// fresh readings every loop() iteration -- see main.cpp's charging branch).
+// A rising edge (charging goes true) switches to the dedicated charging
+// screen; a falling edge returns to Idle. percent/millivolts/currentMa are
+// only used while charging == true. Radio/roster/heartbeat are suspended by
+// main.cpp for the whole time this reports true.
+void setChargingMode(bool charging, uint8_t percent, uint16_t millivolts, int16_t currentMa);
+
 // Call every loop() iteration. Handles timeouts, the delayed 2nd copy of a
 // just-sent warning, the OLED sleep/wake window, and throttled redraws.
 void tick();
