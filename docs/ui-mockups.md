@@ -132,3 +132,16 @@ press**. The field tool for the `RSSI_FALLING_BACK_*` thresholds.
 
 **Range test: dropped off.** If the watched rider has dropped off, the last smoothed RSSI stays
 put and the detail line shows `DROPPED` plus the age of the last heartbeat.
+
+## Charging screen
+
+![Charging screen](mockups/charging.svg)
+
+**Charging.** Entered automatically once the INA219 senses real charge current flowing into the
+battery — not just USB power being present, so a battery-less test device plugged into USB stays in
+normal operation instead. For as long as this is shown, radio, heartbeat, gossip and roster are all
+suspended and the CPU is downclocked, to minimize power draw while plugged in. Shows battery
+percent, voltage, charge current, and your nickname. Sleeps after a fixed **10 s**, independent of
+the normal Display timeout setting (even if that's set to "Never") — any button press reactivates
+it for another 10 s. No other gestures: the emergency double click is disabled while the radio is
+suspended.

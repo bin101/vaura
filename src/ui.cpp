@@ -17,7 +17,13 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C display(U8G2_R0, /*reset=*/U8X8_PIN_NONE);
 // SettingsMenu: entered from Idle via long-press. Short press cycles through
 // Name/Tone/Back (like the warning-send Menu below); long press commits to
 // whichever is currently shown.
-enum class State { BootChannelSelect, Idle, Menu, IncomingWarning, Rename, SettingsMenu, ToneMenu, DisplayMenu, SensitivityMenu, ChannelMenu, StatsScreen, RangeTest, DismissPrompt };
+// Charging: entered/left by setChargingMode() (pushed from main.cpp's
+// Power::isCharging() reading), never by the button -- see the CLAUDE.md
+// note on the four places a State value must stay in sync with, and
+// Charging's own comments at each of them (render(), the button switches,
+// and tick(), which handles it via an early branch instead of an entry in
+// its if-chain).
+enum class State { BootChannelSelect, Idle, Menu, IncomingWarning, Rename, SettingsMenu, ToneMenu, DisplayMenu, SensitivityMenu, ChannelMenu, StatsScreen, RangeTest, DismissPrompt, Charging };
 State state = State::Idle;
 uint32_t stateEnteredMs = 0;
 
@@ -150,6 +156,12 @@ uint8_t batteryPercentForDisplay = 0;
 bool batteryAvailableForDisplay = false;
 bool batteryLowForDisplay = false;
 
+// Charging screen readings, pushed by setChargingMode() -- only meaningful
+// while state == State::Charging.
+uint8_t chargingPercentForDisplay = 0;
+uint16_t chargingMillivoltsForDisplay = 0;
+int16_t chargingCurrentMaForDisplay = 0;
+
 void showToast(const char *text) {
   strncpy(toastBuf, text, sizeof(toastBuf) - 1);
   toastBuf[sizeof(toastBuf) - 1] = '\0';
@@ -181,8 +193,18 @@ void beepPattern(uint8_t count, uint32_t toneDurationMs) {
 // so an active rider never sees it blank out mid-interaction.
 // displayWakeUntilMs is meaningless while the timeout is "Nie" (0) -- tick()
 // short-circuits before ever comparing against it in that case.
+//
+// The charging screen uses its own fixed CHARGING_SCREEN_TIMEOUT_MS instead
+// of DeviceConfig::displayTimeoutMs() -- the rider's normal setting may be
+// "never", but the whole point of charging mode is minimizing power draw, so
+// it always sleeps after 10 s regardless. This is also what makes a button
+// press reactivate the charging screen for free: the existing
+// swallow-first-press wake path in onButtonClick()/onButtonLongPress() just
+// calls wakeDisplay() same as any other state.
 void wakeDisplay() {
-  displayWakeUntilMs = millis() + DeviceConfig::displayTimeoutMs();
+  uint32_t windowMs =
+      state == State::Charging ? CHARGING_SCREEN_TIMEOUT_MS : DeviceConfig::displayTimeoutMs();
+  displayWakeUntilMs = millis() + windowMs;
   if (!displayIsOn) {
     display.setPowerSave(0);
     displayIsOn = true;
@@ -789,6 +811,30 @@ void renderDisplayMenu() {
   display.drawStr(0, 61, "short=change long=OK");
 }
 
+void renderCharging() {
+  display.setFont(u8g2_font_6x10_tf);
+  display.drawStr(0, 9, "Charging");
+  // Plain text badge, right-aligned in the yellow strip -- same mechanism as
+  // the "MUTE" badge in renderIdle(), not a hand-drawn icon: a small vector
+  // glyph (originally a two-triangle lightning bolt) doesn't render cleanly
+  // at this resolution on the real two-tone panel.
+  display.drawStr(128 - 6 * 3, 9, "USB");
+  display.drawHLine(0, 12, 128);
+
+  display.setFont(u8g2_font_9x15B_tf);
+  char pctStr[6];
+  snprintf(pctStr, sizeof(pctStr), "%u%%", chargingPercentForDisplay);
+  display.drawStr(0, 34, pctStr);
+
+  display.setFont(u8g2_font_6x10_tf);
+  char detail[24];
+  snprintf(detail, sizeof(detail), "%u.%02uV  %dmA", chargingMillivoltsForDisplay / 1000,
+           (chargingMillivoltsForDisplay % 1000) / 10, chargingCurrentMaForDisplay);
+  display.drawStr(0, 46, detail);
+
+  display.drawStr(0, 61, DeviceConfig::nickname());
+}
+
 void render() {
   display.clearBuffer();
   switch (state) {
@@ -831,6 +877,9 @@ void render() {
     case State::DismissPrompt:
       renderDismissPrompt();
       break;
+    case State::Charging:
+      renderCharging();
+      break;
   }
   display.sendBuffer();
   lastRenderMs = millis();
@@ -848,6 +897,29 @@ void setBatteryStatusForDisplay(uint8_t percent, bool available, bool low) {
     beepPattern(1, BEEP_DURATION_MS);
   }
   batteryLowForDisplay = low;
+}
+
+void setChargingMode(bool charging, uint8_t percent, uint16_t millivolts, int16_t currentMa) {
+  if (charging) {
+    chargingPercentForDisplay = percent;
+    chargingMillivoltsForDisplay = millivolts;
+    chargingCurrentMaForDisplay = currentMa;
+  }
+  if (charging && state != State::Charging) {
+    // Rising edge only -- wakeDisplay() gives the screen a fresh
+    // CHARGING_SCREEN_TIMEOUT_MS window. Deliberately NOT called again on
+    // every subsequent charging tick (main.cpp pushes fresh readings every
+    // iteration): that would keep extending the window and the screen would
+    // never honor its own 10 s auto-off while charging continued.
+    state = State::Charging;
+    stateEnteredMs = millis();
+    wakeDisplay();
+  } else if (!charging && state == State::Charging) {
+    // Falling edge -- back to the rider's normal idle screen and display
+    // timeout, called once by main.cpp right as charging ends.
+    enterIdle();
+    wakeDisplay();
+  }
 }
 
 bool bootChannelPending() { return state == State::BootChannelSelect; }
@@ -889,6 +961,25 @@ void tick() {
       snprintf(toast, sizeof(toast), "> %s", Protocol::warningLabel(pendingRepeatType));
       showToast(toast);
     }
+  }
+
+  // Charging gets an early return, deliberately NOT an entry in the if-chain
+  // below (see the CLAUDE.md note that tick()'s chain is a plain if-chain the
+  // compiler won't flag for a missing case): its own fixed sleep window
+  // (CHARGING_SCREEN_TIMEOUT_MS, independent of DeviceConfig::displayTimeoutMs()
+  // -- see wakeDisplay()) is the only thing left to do. Everything else below
+  // (roster alerts, drop-off reminders, menu/edit timeouts) is moot -- the
+  // radio/roster themselves are suspended by main.cpp for the whole time
+  // state == Charging, and the state is only ever entered/left by
+  // setChargingMode(), never by a button gesture or a timeout.
+  if (state == State::Charging) {
+    if (displayIsOn && static_cast<int32_t>(now - displayWakeUntilMs) >= 0) {
+      sleepDisplay();
+    }
+    if (displayIsOn && now - lastRenderMs >= kRenderThrottleMs) {
+      render();
+    }
+    return;
   }
 
   bool needsRender = false;
@@ -1067,6 +1158,10 @@ void onButtonClick() {
     case State::StatsScreen:
       stateEnteredMs = millis(); // nothing to cycle -- just keep the screen alive
       break;
+    case State::Charging:
+      // Nothing to cycle -- the wakeDisplay() above already gave the screen
+      // a fresh 10 s window; that's the entire point of a click here.
+      break;
   }
   render();
 }
@@ -1170,6 +1265,10 @@ void onButtonLongPress() {
     case State::StatsScreen:
       enterIdle();
       break;
+    case State::Charging:
+      // Nothing to confirm/commit -- the wakeDisplay() above already gave
+      // the screen a fresh 10 s window, same as a short click.
+      break;
   }
   render();
 }
@@ -1180,6 +1279,14 @@ void onButtonDoubleClick() {
     // instead of firing an ATTENTION! onto a possibly-wrong group.
     wakeDisplay();
     confirmBootChannel();
+    render();
+    return;
+  }
+  if (state == State::Charging) {
+    // The radio is suspended while charging (see main.cpp) -- silently
+    // refuse the emergency gesture instead of pretending to send it. Just
+    // extend the screen's wake window, like any other button press.
+    wakeDisplay();
     render();
     return;
   }

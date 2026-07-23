@@ -61,12 +61,13 @@
 // Piezo beeper, driven through an NPN transistor (e.g. 2N2222) as a low-side
 // switch -- the GPIO can't source enough current for the piezo directly, and
 // this also keeps the piezo off ESP32's own 3.3V logic-level current budget.
-// GPIO2 (D1), not GPIO3 (D2): GPIO3 is an ESP32-S3 strapping pin (JTAG source
-// select at boot) with no internal pull resistor of its own -- anything wired
-// to it needs to be considered as part of the boot-strapping circuit. GPIO2
-// has no such role, so a beeper on it can't interfere with boot.
+// GPIO1 (D0): originally wired to GPIO2 (D1), moved here after a soldering
+// mistake on a physical build. Like GPIO2, GPIO1 has no ESP32-S3
+// strapping-pin role (those are GPIO0/3/45/46 -- see README "Build plan" for
+// why GPIO3/D2 in particular is avoided), so it's equally safe to drive
+// during boot.
 // ---------------------------------------------------------------------------
-#define PIN_PIEZO 2
+#define PIN_PIEZO 1
 // Default/fallback frequency -- the actual frequency in use is user-adjustable
 // at runtime (idle screen: long-press -> settings rotation -> "Tone") and
 // persisted in flash, see DeviceConfig::beepFrequencyHz() below. 3000 Hz sits
@@ -206,6 +207,49 @@ static_assert((BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_S
 // Same thresholds are used for the peers' battery level from their heartbeats.
 #define BATTERY_LOW_MV 3500
 #define BATTERY_LOW_CLEAR_MV 3600
+
+// ---------------------------------------------------------------------------
+// USB charging mode: when the battery is actually being charged (INA219
+// charge-current sensing, not just USB power being present), the device
+// switches to a dedicated low-power charging screen -- radio, heartbeat,
+// gossip and roster are all suspended (main.cpp) and the CPU is downclocked.
+// Deliberately keyed off *current*, not bus voltage or a VBUS pin: a
+// battery-less test device on USB power draws no charge current and
+// therefore never enters this mode, staying in ordinary operation -- see
+// Power::isCharging().
+// ---------------------------------------------------------------------------
+// Entering requires the (sign-normalized) charge current to reach this;
+// once charging, only exits after it has stayed below CHARGING_DETECT_EXIT_MA
+// for CHARGING_MIN_DWELL_MS. The hysteresis gap plus dwell time absorb the
+// current taper near a full charge so the device doesn't flap in and out of
+// charging mode. Starting points only -- verify sign and thresholds on real
+// hardware via the `charge` console command (see config.cpp) before trusting
+// them on a ride.
+#define CHARGING_DETECT_ENTER_MA 40
+#define CHARGING_DETECT_EXIT_MA 15
+#define CHARGING_MIN_DWELL_MS 5000UL
+// The INA219's current sign depends on which way its IN+/IN- ended up
+// soldered relative to the LiPo/charger. Confirmed on hardware via the
+// `charge` console command: this board's raw reading is negative while
+// actually charging, hence -1 here (a positive sign would mean current
+// flowing into the battery). Re-check with `charge` if the board is rewired.
+#define INA219_CURRENT_CHARGE_SIGN -1
+
+// The charging screen always sleeps after this long, independent of the
+// rider's normal DeviceConfig::displayTimeoutMs() setting (which may be
+// "never") -- the whole point of charging mode is minimizing power draw.
+#define CHARGING_SCREEN_TIMEOUT_MS 10000UL
+
+// CPU frequency while charging vs. normal operation (Arduino-ESP32's
+// setCpuFrequencyMhz(); both are valid dividers of the ESP32-S3's 40 MHz
+// XTAL). Downclocking is one of the few power levers available here since
+// there is no light/deep-sleep in this firmware -- loop() otherwise busy-polls.
+#define CHARGING_CPU_FREQ_MHZ 80
+#define NORMAL_CPU_FREQ_MHZ 240
+// Charging-mode loop cadence: there is nothing time-critical left to service
+// (radio/roster/heartbeat are all suspended), so a plain delay() is enough --
+// see main.cpp.
+#define CHARGING_LOOP_DELAY_MS 50UL
 
 // ---------------------------------------------------------------------------
 // UI timing

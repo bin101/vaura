@@ -19,6 +19,12 @@ OneButton button(PIN_BUTTON, /*activeLow=*/true, /*pullupActive=*/true);
 uint32_t nextHeartbeatMs = 0;
 uint32_t nextRosterTickMs = 0;
 
+// True while the device is in the low-power USB-charging screen (see
+// Power::isCharging()). Edge-detected in loop() so Radio::sleep()/resume()
+// and the CPU frequency change only ever fire once per transition, not every
+// iteration.
+bool chargingMode = false;
+
 // Cooperative drop-off confirmation (see coop.h): a gossip send is armed the
 // moment Coop::sendDue() goes true, then actually transmitted after a short
 // random delay so devices reacting to the same event don't all key up at
@@ -167,15 +173,55 @@ void setup() {
 }
 
 void loop() {
-  DeviceConfig::pollSerialConsole();
-  button.tick();
+  DeviceConfig::pollSerialConsole(); // stays available while charging, e.g. for the `charge` command
+  button.tick(); // stays available while charging -- the only way to wake the screen
+
+  uint32_t now = millis();
+
+  // Charging-mode edge detection: Radio::sleep()/resume() and the CPU
+  // frequency change must each fire exactly once per transition, not every
+  // loop() iteration. Keyed off actual charge current (Power::isCharging()),
+  // not USB presence -- a battery-less test device on USB power draws no
+  // charge current and therefore never trips this, staying in normal
+  // operation the whole time (see config.h's CHARGING_* comment block).
+  bool charging = Power::isCharging();
+  if (charging != chargingMode) {
+    chargingMode = charging;
+    if (chargingMode) {
+      Radio::sleep();
+      setCpuFrequencyMhz(CHARGING_CPU_FREQ_MHZ);
+      Serial.println("Charging: charge current detected, entering low-power charging mode.");
+    } else {
+      setCpuFrequencyMhz(NORMAL_CPU_FREQ_MHZ);
+      Radio::resume();
+      // Reschedule from now, not from whenever they were last due -- without
+      // this, a long charge would make both fire as an immediate "overdue"
+      // burst the instant charging ends (same idiom as setup()'s initial
+      // scheduling below).
+      nextHeartbeatMs = now + randomizedHeartbeatInterval();
+      nextRosterTickMs = now + 1000;
+      Ui::setChargingMode(false, 0, 0, 0); // back to Idle -- see Ui::tick()'s Charging branch
+      Serial.println("Charging: charge current gone, resuming normal operation.");
+    }
+  }
+
+  if (chargingMode) {
+    // Minimal loop while charging: radio/roster/gossip/heartbeat are all
+    // suspended above, so there is nothing else to service besides the
+    // charging screen itself. The delay() plus the lowered CPU frequency are
+    // the actual power savings here -- see config.h.
+    Ui::setChargingMode(true, Power::batteryPercent(), Power::batteryMillivolts(),
+                         Power::chargeCurrentMilliamps());
+    Ui::tick();
+    delay(CHARGING_LOOP_DELAY_MS);
+    return;
+  }
+
   // Drain fully: radio.cpp's RX path holds only the single most-recently
   // received frame, so a burst of heartbeats arriving between two loop()
   // iterations would otherwise lose all but the last one.
   while (dispatchIncomingPacket()) {
   }
-
-  uint32_t now = millis();
 
   // Signed difference instead of `now >= deadline`: stays correct across the
   // ~49-day millis() wraparound (same idiom for every deadline in ui.cpp).

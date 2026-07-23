@@ -181,4 +181,17 @@ bool send(uint8_t *data, size_t len) {
   return state == RADIOLIB_ERR_NONE;
 }
 
+void sleep() {
+  // Disarm first: RadioLib's standby() itself doesn't touch the interrupt,
+  // and a stray RX-complete firing right as the radio drops out of receive
+  // has no meaning once we're about to stop servicing it anyway.
+  interruptArmed = false;
+  int state = radio.standby();
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("Radio: standby failed, code %d\n", state);
+  }
+}
+
+void resume() { startListening(); }
+
 } // namespace Radio
