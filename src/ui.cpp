@@ -913,6 +913,14 @@ void setChargingMode(bool charging, uint8_t percent, uint16_t millivolts, int16_
     // never honor its own 10 s auto-off while charging continued.
     state = State::Charging;
     stateEnteredMs = millis();
+    // A warning repeat armed just before charging began must not fire once
+    // charging ends: main.cpp suspends the radio for the whole charging
+    // window, and the repeat would otherwise transmit stale/duplicate
+    // content well after the fact. tick()'s pending-repeat check already
+    // can't run while state == Charging (see tick()'s early return); this
+    // also drops the now-moot retry outright rather than letting it fire on
+    // the first post-charging tick.
+    pendingRepeatArmed = false;
     wakeDisplay();
   } else if (!charging && state == State::Charging) {
     // Falling edge -- back to the rider's normal idle screen and display
@@ -950,6 +958,31 @@ void begin() {
 void tick() {
   uint32_t now = millis();
 
+  // Charging gets an early return, deliberately NOT an entry in the if-chain
+  // below (see the CLAUDE.md note that tick()'s chain is a plain if-chain the
+  // compiler won't flag for a missing case): its own fixed sleep window
+  // (CHARGING_SCREEN_TIMEOUT_MS, independent of DeviceConfig::displayTimeoutMs()
+  // -- see wakeDisplay()) is the only thing left to do. Everything else below
+  // (roster alerts, drop-off reminders, menu/edit timeouts, and the pending
+  // warning-repeat retransmit) is moot -- the radio/roster themselves are
+  // suspended by main.cpp for the whole time state == Charging, and the state
+  // is only ever entered/left by setChargingMode(), never by a button gesture
+  // or a timeout. The pending-repeat check in particular MUST stay below this
+  // return: it calls Radio::send(), and main.cpp puts the radio to sleep
+  // before ever calling Ui::tick() while charging -- see
+  // setChargingMode()'s rising-edge handling, which also clears
+  // pendingRepeatArmed so a repeat armed right before charging began doesn't
+  // fire (on a still-sleeping radio) the instant charging ends either.
+  if (state == State::Charging) {
+    if (displayIsOn && static_cast<int32_t>(now - displayWakeUntilMs) >= 0) {
+      sleepDisplay();
+    }
+    if (displayIsOn && now - lastRenderMs >= kRenderThrottleMs) {
+      render();
+    }
+    return;
+  }
+
   if (pendingRepeatArmed && static_cast<int32_t>(now - pendingRepeatDueMs) >= 0) {
     bool sent = Radio::send(pendingRepeatBuf, pendingRepeatLen);
     pendingRepeatArmed = false;
@@ -961,25 +994,6 @@ void tick() {
       snprintf(toast, sizeof(toast), "> %s", Protocol::warningLabel(pendingRepeatType));
       showToast(toast);
     }
-  }
-
-  // Charging gets an early return, deliberately NOT an entry in the if-chain
-  // below (see the CLAUDE.md note that tick()'s chain is a plain if-chain the
-  // compiler won't flag for a missing case): its own fixed sleep window
-  // (CHARGING_SCREEN_TIMEOUT_MS, independent of DeviceConfig::displayTimeoutMs()
-  // -- see wakeDisplay()) is the only thing left to do. Everything else below
-  // (roster alerts, drop-off reminders, menu/edit timeouts) is moot -- the
-  // radio/roster themselves are suspended by main.cpp for the whole time
-  // state == Charging, and the state is only ever entered/left by
-  // setChargingMode(), never by a button gesture or a timeout.
-  if (state == State::Charging) {
-    if (displayIsOn && static_cast<int32_t>(now - displayWakeUntilMs) >= 0) {
-      sleepDisplay();
-    }
-    if (displayIsOn && now - lastRenderMs >= kRenderThrottleMs) {
-      render();
-    }
-    return;
   }
 
   bool needsRender = false;
