@@ -179,8 +179,12 @@ void handleLine(const String &lineIn) {
     Serial.printf("chargeCurrentMa=%d  isCharging=%s  batteryMv=%u\n",
                   Power::chargeCurrentMilliamps(), Power::isCharging() ? "yes" : "no",
                   Power::batteryMillivolts());
+    // INA219_CURRENT_CHARGE_SIGN is currently -1 (see config.h), so a
+    // correctly-wired board reads chargeCurrentMa POSITIVE while actually
+    // charging. If it reads negative instead, this board's IN+/IN- ended up
+    // the other way round -- flip the sign to +1, not -1 (it's already -1).
     Serial.println(F("If chargeCurrentMa reads negative while actually charging, flip"));
-    Serial.println(F("INA219_CURRENT_CHARGE_SIGN in config.h to -1."));
+    Serial.println(F("INA219_CURRENT_CHARGE_SIGN in config.h to +1 (it is currently -1)."));
   } else {
     Serial.println(F("Unknown command. 'help' for an overview."));
   }

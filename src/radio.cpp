@@ -111,7 +111,16 @@ void begin() {
   radio.setPacketReceivedAction(onPacketReceived);
 
   lastBudgetRefillMs = millis();
-  dutyCycleBudgetUs = kDutyCycleCapacityUs; // start with a full tank
+  // Start empty, not full: crediting a full hour's allowance on every boot
+  // would let a device that brownout-reboots mid-ride (a real scenario, see
+  // config.h's BOOT_CHANNEL_SELECT_TIMEOUT_MS comment) exceed the EU868 1%
+  // duty-cycle limit across the reboot boundary by simply power-cycling. The
+  // budget refills on its own (refillBudget(), called from every poll()/
+  // send()) at the same steady rate either way -- this only costs the first
+  // ~833 ms after boot before there's enough banked to send the first
+  // ~8.3 ms-airtime heartbeat, not perceptible against
+  // BOOT_CHANNEL_SELECT_TIMEOUT_MS's own 10 s window.
+  dutyCycleBudgetUs = 0.0;
 
   startListening();
   Serial.println("Radio: SX1262 ready (EU868, GFSK).");
@@ -171,9 +180,15 @@ bool send(uint8_t *data, size_t len) {
   // callback firing mid-transition.
   interruptArmed = false;
   int state = radio.transmit(data, len);
-  dutyCycleBudgetUs -= timeOnAirUs;
 
-  if (state != RADIOLIB_ERR_NONE) {
+  if (state == RADIOLIB_ERR_NONE) {
+    dutyCycleBudgetUs -= timeOnAirUs;
+  } else {
+    // No antenna time was actually spent on a failed transmit -- charging the
+    // budget anyway would needlessly (if conservatively) burn the shared
+    // duty-cycle allowance on transient SPI/radio errors, and would also
+    // disagree with Stats::countWarningSent()'s "only successful sends count"
+    // policy (see main.cpp/ui.cpp callers).
     Serial.printf("Radio: transmit error, code %d\n", state);
   }
 
