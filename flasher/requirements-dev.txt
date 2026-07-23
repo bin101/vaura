@@ -1,0 +1,4 @@
+# Extra dependencies for running flasher/test_flasher.py -- not needed to
+# just run the flasher itself, see requirements.txt for that.
+-r requirements.txt
+pytest

@@ -30,3 +30,9 @@ jobs:
 
       - name: Run native unit tests
         run: pio test -e native
+
+      - name: Install flasher test dependencies
+        run: pip install -r flasher/requirements-dev.txt
+
+      - name: Run flasher unit tests
+        run: pytest flasher/test_flasher.py -v
