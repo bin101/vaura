@@ -12,7 +12,7 @@ No Meshtastic on board — its own lean broadcast protocol, tailored to a group 
 | Component | Detail |
 |---|---|
 | MCU | Seeed Studio XIAO ESP32-S3 |
-| Radio | Wio-SX1262 (LoRa), plugged onto the XIAO (B2B connector) |
+| Radio | Wio-SX1262 (used in **GFSK** mode, not LoRa — see "Radio protocol" below), plugged onto the XIAO (B2B connector) |
 | Display | 0.96" OLED SSD1306, 128×64, I²C (two-tone panel: top 16 pixel rows yellow, rest blue) |
 | Battery monitor | INA219, I²C, high-side |
 | Battery | LiPo 803040, 1000 mAh |
@@ -142,7 +142,9 @@ Releases are **fully automatic** — there's no manual tagging step in the norma
 
 A maintainer can still push a tag by hand (`git tag vX.Y.Z && git push origin vX.Y.Z`) to trigger a one-off release outside this flow.
 
-**One-time setup for a new fork:** create a public GitHub repo and set the `GITHUB_REPO` constant in `flasher/flasher.py` from the placeholder to `user/repo` — before that, the app can only flash local files.
+**One-time setup for a new fork:**
+- Create a public GitHub repo and set the `GITHUB_REPO` constant in `flasher/flasher.py` from the placeholder to `user/repo` — before that, the app can only flash local files.
+- Add a repo secret named `RELEASE_PAT`: a [personal access token](https://github.com/settings/tokens) with `contents: write` (classic PAT: the `repo` scope) on your fork. `auto-tag.yml` needs it to push the release tag — GitHub's default `GITHUB_TOKEN` is deliberately prevented from triggering another workflow (the anti-recursion guard, see the comment at the top of `auto-tag.yml`), so a tag pushed with it would silently never kick off `release.yml`. Without `RELEASE_PAT`, pushes to `main` are never tagged or released at all.
 
 ## Provisioning (once per device)
 
@@ -174,7 +176,7 @@ If you don't have `pio device monitor` handy: the **Vaura Flasher** has the "Dev
 
 The 5-character limit isn't a round number, it's calculated: the idle screen lists riders in up to **three columns**, and the status lives directly in the name there — `!NAME!` = signal fading, `(NAME)` = dropped off. A name decorated like this takes 5 + 2 = 7 characters, and three 7-character columns exactly fill the 21 characters that fit on one line at 128 px display width and 6 px/character (`u8g2_font_6x10_tf`). A longer name is **rejected** by the `name` command (not silently truncated), with an error message pointing at the limit. (A 6-character name stored under older firmware is automatically shortened to 5 on the first boot.)
 
-> **Firmware update note:** The 5-character limit changed the radio packet format (protocol version 2). **v2 is radio-incompatible with v1** — both sides cleanly reject each other's packets at the version byte. All devices in the club need to be updated together.
+> **Firmware update note:** The 5-character limit changed the radio packet format, bumping the wire-format version (see `Protocol::kVersion` in `src/protocol.h` for the current value and the full bump history — cooperative drop-off confirmation bumped it again since). **Every version bump is radio-incompatible with the previous one** — both sides cleanly reject each other's packets at the version byte. All devices in the club need to be updated together whenever this happens.
 
 ## UI mockups
 
@@ -326,7 +328,7 @@ EU868, 868.3 MHz, **GFSK** (not LoRa) at 19.2 kb/s, ~10 kHz frequency deviation,
 
 With **at least 2 devices**:
 
-1. `pio run -t upload` on both (all devices together — v2 is radio-incompatible with v1, see above), then set nicknames once each (console, or more conveniently: Flasher → "Device").
+1. `pio run -t upload` on both (all devices together — every wire-format version bump is radio-incompatible with the previous one, see above), then set nicknames once each (console, or more conveniently: Flasher → "Device").
 2. Power on both → the **channel prompt** appears with a countdown; long press (or wait 10 s) confirms channel 0. The event line then briefly shows the firmware version (`FW v0.1.x`), and after a few seconds the respective other rider appears in the list (with RSSI), along with `2/2` in the header (the counter includes your own device).
 3. Short press → cycle through → long press on "CAR BEHIND" → the other device shows the warning + beeps 2× short. Short press there dismisses it again.
 4. **Double click** on one device (even with the display asleep) → the other immediately shows `ATTENTION!`.
@@ -345,3 +347,12 @@ With **at least 2 devices**:
 - Verify the 868 MHz antenna before the first transmit test.
 - Optional: AES encryption of packets (currently off, format in `src/protocol.h` prepared for a later extension).
 - Expansion stage 2: dedicated buttons per warning (case model change) + a vibration motor (the piezo beeper is already implemented), so alerts are perceivable without looking at the display; possibly GPS for real distance readings, an SOS function, fall detection.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Built on top of several third-party open-source libraries, each under
+its own license: [RadioLib](https://github.com/jgromes/RadioLib), [U8g2](https://github.com/olikraus/u8g2),
+[OneButton](https://github.com/mathertel/OneButton), [Adafruit INA219](https://github.com/adafruit/Adafruit_INA219),
+[esptool](https://github.com/espressif/esptool), and [certifi](https://github.com/certifi/python-certifi) —
+none of them are redistributed in this repo itself, only pulled in at build time (`platformio.ini`,
+`flasher/requirements.txt`).

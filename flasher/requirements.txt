@@ -1,8 +1,11 @@
-# esptool 4.x: stabile CLI-/main()-API, bringt pyserial mit.
-# tkinter kommt aus der Python-Standardbibliothek.
+# esptool 4.x: stable CLI/main() API, brings pyserial along with it.
+# tkinter comes from the Python standard library.
 esptool>=4.7,<5
 
 # Explicit CA bundle for the GitHub download -- some Python installs (notably
 # python.org builds on macOS) don't have the system trust store wired up to
 # the ssl module, which makes urllib fail with CERTIFICATE_VERIFY_FAILED.
-certifi
+# Pinned to a floor version with a fix for a known-expired intermediate CA
+# bundled in older releases (avoids a resurrected CERTIFICATE_VERIFY_FAILED
+# from certifi itself going stale).
+certifi>=2024.7.4
