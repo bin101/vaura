@@ -1,6 +1,11 @@
 // Tracks the other riders' devices heard this outing: presence (via
 // heartbeats) and a smoothed RSSI trend, which is how "falling back" /
-// "dropped off" is detected automatically -- no GPS needed.
+// "dropped off" is detected automatically -- no GPS needed. From 3 devices
+// on, that local per-device verdict is only ever an *opinion*: it is
+// corroborated with the rest of the group over a lightweight gossip mesh
+// (see coop.{h,cpp}) before it becomes the alert exposed here -- see
+// Roster::tick() for the consensus gating, and Coop::Consensus for what
+// happens below 3 devices or when a peer has too few potential observers.
 #pragma once
 
 #include <Arduino.h>
@@ -17,9 +22,12 @@ enum class AlertType { FallingBack, DroppedOff };
 struct PeerInfo {
   uint16_t nodeId; // for Roster::dismiss()
   char nickname[Protocol::kNicknameFieldLen + 1];
-  int16_t rssiDbm; // fast-smoothed (EMA), the value the "falling back" logic judges
+  int16_t rssiDbm; // fast-smoothed (EMA), the value this device's own local verdict judges
   int16_t lastRawRssiDbm; // unsmoothed RSSI of the most recent heartbeat
   uint16_t batteryMillivolts; // 0 if the peer has no battery monitor
+  // Group-consensus-gated, not purely local: e.g. droppedOff can be false
+  // here even while this device hasn't heard the peer in a while, if the
+  // rest of the group still hears them (see Roster::tick()).
   bool fallingBack;
   bool droppedOff;
   uint32_t lastSeenMs;

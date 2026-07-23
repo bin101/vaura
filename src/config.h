@@ -190,6 +190,11 @@ static_assert((BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_S
 
 #define MAX_PEERS 16
 
+// Cooperative drop-off confirmation's own tunables (COOP_MIN_GROUP,
+// COOP_REFRESH_MS, quorum percentages, ...) live in coop.h, not here: that
+// module is deliberately Arduino-free (like protocol.h) so it runs in the
+// native unit-test environment, and config.h pulls in Arduino.h.
+
 // ---------------------------------------------------------------------------
 // Battery thresholds
 // ---------------------------------------------------------------------------

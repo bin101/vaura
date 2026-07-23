@@ -12,12 +12,13 @@
 namespace Protocol {
 
 constexpr uint8_t kMagic = 0xC9;
-// v2: nickname field shrank from 6 to 5 bytes. Bumped deliberately so v1 and
-// v2 devices reject each other symmetrically at the version byte -- without
-// the bump a v1 device would silently never see v2 heartbeats (13 < its
-// expected 14) while v2 still saw v1, a one-way invisibility that is far more
-// confusing than a clean "update the whole fleet together".
-constexpr uint8_t kVersion = 2;
+// v3: added the Gossip message type (cooperative drop-off confirmation, see
+// coop.{h,cpp}). Bumped deliberately, same reasoning as the v1->v2 bump
+// below: v2 and v3 devices reject each other symmetrically at the version
+// byte rather than a v2 device silently never seeing Gossip traffic while a
+// v3 device sees everything -- a clean "update the whole fleet together".
+// v2: nickname field shrank from 6 to 5 bytes.
+constexpr uint8_t kVersion = 3;
 // Hard cap on nickname length -- not an arbitrary round number. The idle
 // screen lists riders in up to three columns on the 128px display, and a name
 // is shown "decorated" with its status there: "!NAME!" = signal fading,
@@ -26,11 +27,19 @@ constexpr uint8_t kVersion = 2;
 // at the 6px/char font (u8g2_font_6x10_tf). Raising this breaks that layout
 // (see ui.cpp renderIdle()).
 constexpr size_t kNicknameFieldLen = 5; // not null-terminated on the wire
-constexpr size_t kMaxPacketLen = 16; // generous headroom over the largest packet
+
+// Header common to every packet: magic(1) + version(1) + msgType(1) +
+// senderId(2) + seq(1). Exposed here (not just internal to protocol.cpp) so
+// callers can size buffers/derive per-type capacity constants (see
+// kMaxGossipEntries below).
+constexpr size_t kHeaderLen = 6;
+
+constexpr size_t kMaxPacketLen = 40; // generous headroom over the largest packet (a full Gossip batch)
 
 enum class MsgType : uint8_t {
   Heartbeat = 1,
   Warning = 2,
+  Gossip = 3,
 };
 
 // Ordered roughly by expected frequency of use -- also the order they cycle
@@ -49,6 +58,36 @@ enum class WarningType : uint8_t {
 // Human-readable short labels for the OLED (max ~16 chars at the chosen font).
 const char *warningLabel(WarningType type);
 
+// Cooperative drop-off confirmation ("anomaly gossip", see coop.{h,cpp}):
+// each device relays only its own and others' WEAK/LOST *opinions* about a
+// peer, never "OK" -- an all-fine group therefore generates no gossip
+// traffic at all. A device's local RSSI/heartbeat verdict is what forms an
+// opinion; it no longer alerts the rider on its own (see Roster::tick()).
+enum class GossipStatus : uint8_t {
+  Weak = 0, // observer's local "falling back" opinion of the subject
+  Lost = 1, // observer's local "dropped off" opinion of the subject
+};
+
+// One relayed opinion: `observerId` is whose opinion this is (not necessarily
+// the packet's senderId -- a relay forwards someone else's entry unchanged
+// apart from `ttl`). `seq` is per (observerId, subjectId), bumped on every
+// status change AND on every periodic refresh while the opinion stays
+// active, so a stale/duplicate copy arriving via a different relay path can
+// be told apart from a genuinely newer report (see coop.cpp).
+struct GossipEntry {
+  uint16_t observerId;
+  uint16_t subjectId;
+  GossipStatus status;
+  uint8_t ttl; // remaining relay hops; forwarders decrement, 0 = do not relay further
+  uint8_t seq;
+};
+
+constexpr size_t kGossipEntryWireLen = 6; // observerId(2) + subjectId(2) + status/ttl(1) + seq(1)
+constexpr size_t kGossipCountLen = 1; // entry-count byte
+// How many entries fit in one packet given kMaxPacketLen -- also the buffer
+// size DecodedPacket::gossipEntries needs.
+constexpr size_t kMaxGossipEntries = (kMaxPacketLen - kHeaderLen - kGossipCountLen) / kGossipEntryWireLen;
+
 // Decoded representation of any received packet. Only the fields relevant to
 // `type` are meaningful -- callers switch on `type` first.
 struct DecodedPacket {
@@ -60,6 +99,9 @@ struct DecodedPacket {
   char nickname[kNicknameFieldLen + 1];
   // Warning
   WarningType warningType;
+  // Gossip
+  GossipEntry gossipEntries[kMaxGossipEntries];
+  uint8_t gossipCount;
 };
 
 // Encoders return the number of bytes written into `out` (which must be at
@@ -67,6 +109,9 @@ struct DecodedPacket {
 size_t encodeHeartbeat(uint8_t *out, uint16_t senderId, uint8_t seq, uint16_t batteryMillivolts,
                         const char *nickname);
 size_t encodeWarning(uint8_t *out, uint16_t senderId, uint8_t seq, WarningType type);
+// `count` is clamped to kMaxGossipEntries if larger (callers should already
+// respect the cap -- see Coop::collectOutgoing()).
+size_t encodeGossip(uint8_t *out, uint16_t senderId, uint8_t seq, const GossipEntry *entries, uint8_t count);
 
 // Returns true and fills `result` if `data` is a well-formed packet of a known type.
 bool decode(const uint8_t *data, size_t len, DecodedPacket &result);

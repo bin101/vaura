@@ -5,6 +5,7 @@
 #include <OneButton.h>
 
 #include "config.h"
+#include "coop.h"
 #include "power.h"
 #include "protocol.h"
 #include "radio.h"
@@ -17,6 +18,13 @@ OneButton button(PIN_BUTTON, /*activeLow=*/true, /*pullupActive=*/true);
 
 uint32_t nextHeartbeatMs = 0;
 uint32_t nextRosterTickMs = 0;
+
+// Cooperative drop-off confirmation (see coop.h): a gossip send is armed the
+// moment Coop::sendDue() goes true, then actually transmitted after a short
+// random delay so devices reacting to the same event don't all key up at
+// once (mirrors the heartbeat jitter idiom below, at a shorter timescale).
+bool gossipSendArmed = false;
+uint32_t nextGossipSendMs = 0;
 
 // Tracks the last WARNING seq reacted to *per sender*, so the guaranteed 2nd
 // copy (see WARNING_REPEAT_DELAY_MS / Ui::sendWarning()) doesn't trigger a
@@ -67,6 +75,34 @@ void sendHeartbeat() {
   Radio::send(buf, len);
 }
 
+// Transmits a due gossip packet (own opinion changes/refreshes and/or
+// pending relays), jittered so several devices reacting to the same event
+// don't all key up in the same instant. No-op (and no radio traffic at all)
+// whenever the group is entirely OK -- see Coop::sendDue().
+void serviceGossip(uint32_t now) {
+  if (!gossipSendArmed) {
+    if (!Coop::sendDue(now)) {
+      return;
+    }
+    gossipSendArmed = true;
+    nextGossipSendMs = now + static_cast<uint32_t>(random(0, static_cast<long>(Coop::kSendJitterMs) + 1));
+    return;
+  }
+  if (static_cast<int32_t>(now - nextGossipSendMs) < 0) {
+    return; // jitter window not elapsed yet
+  }
+  gossipSendArmed = false;
+
+  Protocol::GossipEntry entries[Protocol::kMaxGossipEntries];
+  uint8_t count = Coop::collectOutgoing(entries, static_cast<uint8_t>(Protocol::kMaxGossipEntries), now);
+  if (count == 0) {
+    return; // whatever was due already resolved (e.g. the opinion was retracted) -- nothing left to send
+  }
+  uint8_t buf[Protocol::kMaxPacketLen];
+  size_t len = Protocol::encodeGossip(buf, DeviceConfig::nodeId(), DeviceConfig::nextSeq(), entries, count);
+  Radio::send(buf, len); // best-effort, like heartbeats/warnings -- see coop.h's kRefreshMs comment
+}
+
 // Returns true if a packet was dispatched, so the caller can drain a burst
 // (radio.cpp's RX path holds only one frame at a time -- see the comment in
 // loop() below).
@@ -81,6 +117,13 @@ bool dispatchIncomingPacket() {
     case Protocol::MsgType::Heartbeat:
       Roster::onHeartbeat(pkt.senderId, pkt.nickname, pkt.batteryMillivolts, rssi);
       break;
+    case Protocol::MsgType::Gossip: {
+      uint32_t now = millis();
+      for (uint8_t i = 0; i < pkt.gossipCount; i++) {
+        Coop::mergeEntry(DeviceConfig::nodeId(), pkt.gossipEntries[i], now);
+      }
+      break;
+    }
     case Protocol::MsgType::Warning: {
       if (!isRepeatedWarning(pkt.senderId, pkt.seq)) {
         Stats::countWarningReceived();
@@ -102,6 +145,7 @@ void setup() {
   Ui::begin();
   Radio::begin();
   Roster::begin();
+  Coop::begin();
 
   // random() (used for heartbeat jitter, see randomizedHeartbeatInterval())
   // is otherwise unseeded, so devices booted around the same time would draw
@@ -145,9 +189,15 @@ void loop() {
   }
 
   if (static_cast<int32_t>(now - nextRosterTickMs) >= 0) {
-    Roster::tick(now);
+    Roster::tick(now); // also drives Coop::tick() internally
     nextRosterTickMs = now + 1000;
   }
+
+  // No boot-channel gating here (unlike sendHeartbeat() above): gossip only
+  // ever fires in reaction to an actual WEAK/LOST opinion or relay, which
+  // can't exist yet this early (Roster hasn't heard anyone), so there is
+  // nothing to hold back.
+  serviceGossip(now);
 
   Ui::setBatteryStatusForDisplay(Power::batteryPercent(), Power::available(), Power::isLow());
   Ui::tick();

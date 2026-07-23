@@ -5,9 +5,6 @@
 namespace Protocol {
 
 namespace {
-// Header common to every packet: magic, version, msgType, senderId(2), seq
-constexpr size_t kHeaderLen = 6;
-
 void writeU16(uint8_t *out, size_t offset, uint16_t value) {
   out[offset] = static_cast<uint8_t>(value & 0xFF);
   out[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
@@ -66,6 +63,25 @@ size_t encodeWarning(uint8_t *out, uint16_t senderId, uint8_t seq, WarningType t
   return offset;
 }
 
+size_t encodeGossip(uint8_t *out, uint16_t senderId, uint8_t seq, const GossipEntry *entries, uint8_t count) {
+  if (count > kMaxGossipEntries) {
+    count = static_cast<uint8_t>(kMaxGossipEntries); // defensive -- callers should already cap
+  }
+  size_t offset = writeHeader(out, MsgType::Gossip, senderId, seq);
+  out[offset++] = count;
+  for (uint8_t i = 0; i < count; i++) {
+    writeU16(out, offset, entries[i].observerId);
+    offset += 2;
+    writeU16(out, offset, entries[i].subjectId);
+    offset += 2;
+    // status in the top bit, ttl in the low nibble -- ttl only ever needs
+    // COOP_TTL_HOPS worth of range (a handful), 4 bits is generous headroom.
+    out[offset++] = static_cast<uint8_t>((static_cast<uint8_t>(entries[i].status) << 7) | (entries[i].ttl & 0x0F));
+    out[offset++] = entries[i].seq;
+  }
+  return offset;
+}
+
 bool decode(const uint8_t *data, size_t len, DecodedPacket &result) {
   if (len < kHeaderLen || data[0] != kMagic || data[1] != kVersion) {
     return false;
@@ -96,6 +112,32 @@ bool decode(const uint8_t *data, size_t len, DecodedPacket &result) {
         return false;
       }
       result.warningType = static_cast<WarningType>(data[kHeaderLen]);
+      return true;
+    }
+    case MsgType::Gossip: {
+      if (len < kHeaderLen + kGossipCountLen) {
+        return false;
+      }
+      uint8_t count = data[kHeaderLen];
+      if (count > kMaxGossipEntries) {
+        return false; // malformed -- more entries than could ever legally fit
+      }
+      size_t needed = kHeaderLen + kGossipCountLen + static_cast<size_t>(count) * kGossipEntryWireLen;
+      if (len < needed) {
+        return false;
+      }
+      size_t offset = kHeaderLen + kGossipCountLen;
+      for (uint8_t i = 0; i < count; i++) {
+        result.gossipEntries[i].observerId = readU16(data, offset);
+        offset += 2;
+        result.gossipEntries[i].subjectId = readU16(data, offset);
+        offset += 2;
+        uint8_t statusTtl = data[offset++];
+        result.gossipEntries[i].status = static_cast<GossipStatus>((statusTtl >> 7) & 0x01);
+        result.gossipEntries[i].ttl = statusTtl & 0x0F;
+        result.gossipEntries[i].seq = data[offset++];
+      }
+      result.gossipCount = count;
       return true;
     }
     default:
