@@ -21,8 +21,8 @@
   <rect x="-3" y="0" width="134" height="64" fill="#04070a"/>
   <text x="0" y="9" font-size="8" text-anchor="start" class="y" filter="url(#glowY)">Range test:</text>
   <line x1="0" y1="12" x2="128" y2="12" stroke="#ffd97a" stroke-width="1" class="y" filter="url(#glowY)"/>
-  <text x="0" y="34" font-size="13" font-weight="bold" text-anchor="start" class="b" filter="url(#glowB)">(MAX) -104</text>
-  <text x="0" y="44" font-size="5" text-anchor="start" class="b" filter="url(#glowB)">DROPPED  40s ago</text>
+  <text x="0" y="34" font-size="13" font-weight="bold" text-anchor="start" class="b" filter="url(#glowB)">!MAX! -101</text>
+  <text x="0" y="44" font-size="5" text-anchor="start" class="b" filter="url(#glowB)">raw -103 dBm   trend -7 dB</text>
   <text x="0" y="53" font-size="5" text-anchor="start" class="b" filter="url(#glowB)">base -80 dBm   floor -95 dBm</text>
   <text x="0" y="61" font-size="8" text-anchor="start" class="b" filter="url(#glowB)">short=rider long=exit</text>
   <rect x="-3" y="0" width="134" height="64" fill="url(#scan)"/>

@@ -6,6 +6,7 @@
 #include "power.h" // `charge` console command reads the raw INA219 charge current
 #include "protocol.h"
 #include "radio.h" // console channel changes apply immediately (applyChannel)
+#include "trace.h" // `trace` console commands
 
 namespace DeviceConfig {
 
@@ -50,6 +51,9 @@ void printHelp() {
   Serial.println(F("display <0|15|30|60|300> Display auto-off in seconds (0 = never)"));
   Serial.println(F("beep [Hz]                Play a test tone, e.g.: beep 3200 (no Hz: current frequency)"));
   Serial.println(F("charge                   Show raw charge current -- for charging-mode calibration"));
+  Serial.println(F("trace on|off             Start/stop recording the calibration trace (see 'trace dump')"));
+  Serial.println(F("trace dump               Print the recorded calibration trace as CSV"));
+  Serial.println(F("trace clear              Discard recorded calibration trace samples"));
   Serial.println(F("help                     Show this help"));
 }
 
@@ -128,8 +132,11 @@ void handleLine(const String &lineIn) {
       Serial.printf("Error: expected level 0-%d.\n", FALLING_BACK_SENSITIVITY_MAX);
     } else {
       setFallingBackSensitivity(static_cast<uint8_t>(level));
-      Serial.printf("OK sensitivity=%ld (floor %d dBm)\n", level,
-                    fallingBackFloorDbm(static_cast<uint8_t>(level)));
+      // The absolute floor isn't printable here any more -- it's derived from
+      // the live group baseline (see Roster::activeFloorDbm(), calibration.h),
+      // which this module doesn't track. Report the margin, the one part of
+      // the calibration this setting actually controls.
+      Serial.printf("OK sensitivity=%ld (margin %d dB)\n", level, fallingBackMarginDb(static_cast<uint8_t>(level)));
     }
   } else if (lower.startsWith("tone ")) {
     long level = parseNumericArg(line, 5);
@@ -187,6 +194,19 @@ void handleLine(const String &lineIn) {
         tone(PIN_PIEZO, freq, 600);
       }
     }
+  } else if (lower.equals("trace on")) {
+    Trace::setEnabled(true);
+    Serial.printf("Trace: recording on (%u/%u samples stored).\n", static_cast<unsigned>(Trace::count()),
+                  static_cast<unsigned>(Trace::capacity()));
+  } else if (lower.equals("trace off")) {
+    Trace::setEnabled(false);
+    Serial.printf("Trace: recording off (%u/%u samples stored -- 'trace dump' to read them).\n",
+                  static_cast<unsigned>(Trace::count()), static_cast<unsigned>(Trace::capacity()));
+  } else if (lower.equals("trace dump")) {
+    Trace::dumpCsv();
+  } else if (lower.equals("trace clear")) {
+    Trace::clear();
+    Serial.println(F("Trace: cleared."));
   } else if (lower.equals("charge")) {
     // Not part of `status` -- this is a one-time hardware calibration aid
     // (see config.h's INA219_CURRENT_CHARGE_SIGN comment), not a persisted
