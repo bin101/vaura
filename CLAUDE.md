@@ -20,9 +20,11 @@ compile anything.
 |---|---|
 | `src/protocol.{h,cpp}` | Wire format: heartbeat + warning + gossip packets, versioned (`kVersion`) |
 | `src/roster.{h,cpp}` | Peer tracking: dual-EMA RSSI trend, falling-back/dropped-off detection |
+| `src/calibration.{h,cpp}` | Pure math for the self-calibrated falling-back floor: group-baseline median/smoothing, baseline-relative floor derivation |
 | `src/coop.{h,cpp}` | Cooperative drop-off confirmation: anomaly-only gossip mesh that corroborates a peer's local falling-back/dropped-off verdict across the group before it becomes an alert |
 | `src/ui.{h,cpp}` | OLED rendering + single-button state machine (largest file, ~1300 lines) |
 | `src/config.{h,cpp}` | Pin map, tunable constants, persisted per-device settings (NVS), serial console |
+| `src/trace.{h,cpp}` | Opt-in onboard ring buffer of calibration samples for post-ride CSV analysis (`trace` console commands) |
 | `src/power.{h,cpp}` | INA219 battery reading, low-battery latch, charging detection |
 | `src/charging_decision.{h,cpp}` | Pure hysteresis/dwell-time state machine behind `Power::isCharging()` |
 | `src/radio.{h,cpp}` | SX1262 GFSK wrapper, EU868 duty-cycle budget |
@@ -32,7 +34,7 @@ compile anything.
 | `src/main.cpp` | Entry point wiring the modules together |
 | `flasher/flasher.py` | Standalone GUI flasher + device-settings tool (esptool-based) |
 | `docs/ui-mockups.md` + `docs/mockups/*.svg` | One rendered mockup per UI screen state; regenerate via `docs/mockups/generate.py` |
-| `test/` | Native unit tests (protocol, coop, charging decision, battery curve, node id roundtrips) — no hardware needed |
+| `test/` | Native unit tests (protocol, coop, charging decision, battery curve, node id roundtrips, calibration) — no hardware needed |
 | `.github/workflows/` | CI (build + test on push) and release (tag-triggered firmware + flasher builds) |
 
 ## Build, test, flash

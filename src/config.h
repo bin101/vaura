@@ -9,6 +9,8 @@
 
 #include <Arduino.h>
 
+#include "calibration.h"
+
 // Injected by platformio.ini from `git describe --tags` (SemVer tags, e.g.
 // "v0.1.0" or "v0.1.0-3-g8f0e765-dirty" between releases). Fallback for
 // build paths that don't pass the flag.
@@ -135,36 +137,69 @@
 // and went straight to dropped-off. The slow EMA (alpha 0.05, time constant
 // ~20 heartbeats = ~40 s) is "where the signal usually sits"; the fast one is
 // "where it is right now".
-#define RSSI_FALLING_BACK_FLOOR_DBM -105
 #define RSSI_FALLING_BACK_DROP_DB 6
 #define RSSI_EMA_ALPHA_FAST 0.35f
 #define RSSI_EMA_ALPHA_SLOW 0.05f
 
-// The floor is user-adjustable in 11 steps (0..10) via the settings menu
-// ("Sensitivity"), persisted in NVS -- see DeviceConfig::fallingBackSensitivity().
-// Each step shifts the floor by 3 dB; step 5 is the historical fixed value:
-//   step 0  -> -120 dBm: below the receiver's sensitivity (~-111 dBm), falling
-//              back effectively never fires -- a clean "practically off"
-//              endpoint (dropped-off detection is unaffected).
-//   step 10 -> -90 dBm: for distant riders the floor is almost always met, so
-//              the check degenerates -- deliberately -- into the pure trend
-//              detector ("warn on any 6 dB sag against the baseline").
+// The floor used to be a fixed dBm value the rider picked by hand -- but the
+// "right" number depends on terrain, group size and antenna placement, and
+// changes every ride. Instead the floor now self-calibrates: Roster::tick()
+// tracks a "group baseline" (the median slow-EMA RSSI across the intact
+// group, see Calibration::medianDbm()/smoothBaseline() in calibration.{h,cpp})
+// and the floor becomes `baseline - margin` (Calibration::deriveFloorDbm()).
+// A rider genuinely falling back then has to sag below "everyone else, right
+// now", not below a number guessed on a different ride in different woods.
+//
+// The margin is user-adjustable in 11 steps (0..10) via the settings menu
+// ("Sensitivity"), persisted in NVS as before -- see
+// DeviceConfig::fallingBackSensitivity(). Each step is worth 3 dB, but the
+// direction is now a genuine sensitivity (higher = more sensitive = triggers
+// on a smaller sag), the opposite sense of the old absolute-floor scale:
+//   step 0  -> 30 dB margin: only a very large sag below the group trips it --
+//              a clean "practically off" endpoint, closest to never firing.
+//   step 10 ->  0 dB margin: any sag below the current group baseline trips
+//              it, deliberately degenerating into the pure trend detector
+//              ("warn on any 6 dB sag against the baseline").
+// step 5 (default) -> 15 dB, replacing the historical fixed -105 dBm floor as
+// the everyday middle ground.
 // The RSSI_FALLING_BACK_DROP_DB condition stays FIXED across all steps:
 // shrinking it would trip on normal multipath wobble (underpass, truck,
 // corner), and one explainable degree of freedom is all a one-button menu
 // can reasonably carry.
 #define FALLING_BACK_SENSITIVITY_DEFAULT 5
 #define FALLING_BACK_SENSITIVITY_MAX 10 // steps 0..10 = 11 ruler positions
-constexpr int16_t fallingBackFloorDbm(uint8_t level) {
-  return static_cast<int16_t>(-120 + 3 * static_cast<int>(level));
+#define FALLING_BACK_MARGIN_DB_PER_STEP 3
+constexpr int fallingBackMarginDb(uint8_t level) {
+  return Calibration::marginDbForLevel(level, FALLING_BACK_SENSITIVITY_MAX, FALLING_BACK_MARGIN_DB_PER_STEP);
 }
-static_assert(fallingBackFloorDbm(FALLING_BACK_SENSITIVITY_DEFAULT) == RSSI_FALLING_BACK_FLOOR_DBM,
-              "step 5 must equal the historical fixed floor");
+static_assert(fallingBackMarginDb(FALLING_BACK_SENSITIVITY_DEFAULT) == 15,
+              "step 5 must equal the historical fixed floor's effective margin (-105 vs. the old -90 dBm endpoint)");
 // The tone menu shares the same 0..10 ruler scale (step = (Hz - min) / step
 // width) -- if either range changes, the two menus drift apart visually.
 static_assert((BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_STEP_HZ ==
                   FALLING_BACK_SENSITIVITY_MAX,
               "tone and sensitivity menus share the same 0..10 ruler scale");
+
+// Group-baseline calibration tunables (Roster::tick(), Calibration::*).
+// Smooths the per-tick median slow-EMA RSSI across the intact group into a
+// stable baseline -- same alpha-blend shape as the per-peer EMAs above, but
+// slower still: the baseline should track "what terrain/formation are we in
+// right now", not wobble with every single tick's median.
+#define CAL_BASELINE_ALPHA 0.1f
+// Below this many present peers (this device's own view of the group, not
+// counting the subject being judged) there aren't enough independent RSSI
+// samples to trust a median -- falls back to the fixed floor below, exactly
+// reproducing the pre-calibration behaviour until there's enough company.
+#define CAL_MIN_PEERS_FOR_BASELINE 2
+// Fallback absolute floor while no baseline is established yet (fresh boot,
+// riding alone, or too small a group) -- the historical fixed value.
+#define RSSI_FALLING_BACK_FLOOR_DBM -105
+// Clamp band for the derived floor: never below the radio's real receive
+// sensitivity (there's no point warning on RSSI values that can't occur), and
+// never so high that a very tight, quiet pack could put it into "everything
+// is a false alarm" territory.
+#define CAL_FLOOR_MIN_DBM -112
+#define CAL_FLOOR_MAX_DBM -80
 
 // A peer is considered fully dropped ("dropped off") once its heartbeat has
 // been missing for this many intervals. Kept at 2 rather than 1: a single missed
@@ -190,6 +225,22 @@ static_assert((BEEP_FREQUENCY_MAX_HZ - BEEP_FREQUENCY_MIN_HZ) / BEEP_FREQUENCY_S
 #define DROPPED_OFF_REMINDER_INTERVAL_MS 30000UL
 
 #define MAX_PEERS 16
+
+// ---------------------------------------------------------------------------
+// Onboard calibration trace (Trace::, trace.{h,cpp})
+// ---------------------------------------------------------------------------
+// Ring buffer of per-peer calibration samples (raw/fast/slow RSSI + group
+// baseline/floor + local verdict), recorded once per Roster::tick() (~1/s)
+// while recording is on (`trace on`/`trace off`/`trace dump`/`trace clear` on
+// the serial console) -- for post-ride CSV analysis of how the self-
+// calibrated floor actually tracked the group. Off by default: pure overhead
+// otherwise, and nobody wants a ride's worth of samples dumped unasked-for.
+// Prefers PSRAM (this board has 8 MB) for a ride-length buffer; falls back to
+// a small static RAM allocation if no PSRAM is found (psramFound()) so the
+// feature still works, just with a much shorter recording window, on a board
+// without it enabled.
+#define TRACE_CAPACITY_PSRAM_SAMPLES 20000
+#define TRACE_CAPACITY_RAM_FALLBACK_SAMPLES 200
 
 // Cooperative drop-off confirmation's own tunables (COOP_MIN_GROUP,
 // COOP_REFRESH_MS, quorum percentages, ...) live in coop.h, not here: that
@@ -321,7 +372,7 @@ uint32_t displayTimeoutMs();
 void setDisplayTimeoutMs(uint32_t ms);
 
 // Persisted "falling back" sensitivity step (0..FALLING_BACK_SENSITIVITY_MAX),
-// see fallingBackFloorDbm() above for the mapping. Falls back to
+// see fallingBackMarginDb() above for the mapping. Falls back to
 // FALLING_BACK_SENSITIVITY_DEFAULT if never set.
 uint8_t fallingBackSensitivity();
 void setFallingBackSensitivity(uint8_t level);

@@ -169,6 +169,9 @@ The console can now set **all** device settings (case-insensitive):
 | `tone <0–10>` | Set the piezo tone level (plays a test beep) |
 | `display <0\|15\|30\|60\|300>` | Display auto-off in seconds (0 = never) |
 | `beep [Hz]` | Play a test tone |
+| `trace on` / `trace off` | Start/stop recording the calibration trace (raw/fast/slow RSSI + group baseline/floor per peer, ~1/s) |
+| `trace dump` | Print the recorded trace as CSV, for post-ride analysis |
+| `trace clear` | Discard recorded trace samples |
 
 If you don't have `pio device monitor` handy: the **Vaura Flasher** has the "Device" section for this (see the flasher section above) — same commands, with form fields.
 
@@ -180,7 +183,7 @@ The 5-character limit isn't a round number, it's calculated: the idle screen lis
 
 ## UI mockups
 
-[`docs/ui-mockups.md`](docs/ui-mockups.md) shows **every** screen state from `ui.cpp` as an image: boot channel selection, idle screen (alone / 1-, 2-, and 3-column rider list / muted / battery hint), send menu, incoming warning, "still dropped off" prompt, settings, stats, tone and sensitivity (both with a ruler scale), display (auto-off timeout), channel, changing the name, and range test (normal + dropped off).
+[`docs/ui-mockups.md`](docs/ui-mockups.md) shows **every** screen state from `ui.cpp` as an image: boot channel selection, idle screen (alone / 1-, 2-, and 3-column rider list / muted / battery hint), send menu, incoming warning, "still dropped off" prompt, settings, stats, tone and sensitivity (both with a ruler scale), display (auto-off timeout), channel, changing the name, and range test (normal + falling back + dropped off).
 
 ## Operation (one button)
 
@@ -274,15 +277,15 @@ Long press from the idle screen opens settings — handy on the road, without Pl
 - **Stats** → overview of the current tour: ride time since power-on, warnings sent and received, drop-offs. Deliberately not saved — every tour starts at zero.
 - **Tone** → piezo beeper frequency, shown as a **level 0–10 on a ruler scale** (level = (Hz − 2500) / 100): short press advances one level (plays a 500 ms test tone each time), wraps back to level 0 at the top end. Long press saves permanently to flash.
 - **Display** → display auto-off timeout: short press cycles through **Never/15 s/30 s/1 min/5 min**, long press saves permanently to flash (see "Display sleep" above).
-- **Sensitivity** → sensitivity of the falling-back early warning, same **ruler scale 0–10** (default: level 5 in the middle). Each level shifts the warning threshold by 3 dB:
+- **Sensitivity** → sensitivity of the falling-back early warning, same **ruler scale 0–10** (default: level 5 in the middle). The floor is no longer a fixed dBm value picked once by hand — it self-calibrates from the **group's own current baseline signal** (the median slow-smoothed RSSI across everyone still present, see "How drop-off detection works" below), and the level sets the **margin** below that baseline:
 
-  | Level | Threshold | Meaning |
+  | Level | Margin below baseline | Meaning |
   |---|---|---|
-  | 0 | −120 dBm | below the reception limit → practically off (drop-off detection stays active) |
-  | 5 | −105 dBm | default (previous fixed behavior) |
-  | 10 | −90 dBm | very early — warns even at a slight falling back |
+  | 0 | 30 dB | least sensitive — only a large sag below the group triggers |
+  | 5 | 15 dB | default |
+  | 10 | 0 dB | most sensitive — any sag below the current baseline triggers, degenerating into the pure trend check |
 
-  The second condition (a sustained drop of ≥6 dB below your own baseline) stays the same across all levels — the level only determines **at what signal strength** a warning fires. To calibrate in the field: the range test (below) shows live the value this logic judges.
+  The second condition (a sustained drop of ≥6 dB below your own baseline) stays the same across all levels — the level only determines **how far below the group** a rider has to sag before the warning fires. Because the floor tracks the group's own signal instead of a fixed number, it adapts automatically between rides to terrain and formation — no more re-guessing after moving to different woods or a bigger group. The floor is clamped to [−112, −80] dBm and falls back to the historical fixed −105 dBm value until at least 2 peers are present to calibrate against. To watch it live in the field: the range test (below) shows the current baseline and floor.
 - **Channel** → radio channel 0–9 of the group (the same one the boot-time channel prompt sets). **All devices on a ride must be on the same channel** — different channels can't hear each other at all (a channel mistake looks exactly like everyone dropping off). Long press saves, switches immediately, and clears the rider list (riders on the old channel would otherwise become false drop-offs). Default: channel 0. Useful when two groups are riding at the same time.
 - **Name** → as described two sections below.
 - **Test** → range test, see the next section.
@@ -292,7 +295,7 @@ Long press from the idle screen opens settings — handy on the road, without Pl
 
 ### Range test (field test tool)
 
-Settings → **Test** shows for one rider, live: large, the smoothed RSSI (the value the falling-back logic judges), below it the raw RSSI of the last heartbeat and its age. Short press switches the observed rider, long press exits. **No timeout, no display sleep** in this mode — a range walk takes minutes of glancing, and you explicitly started the mode. The exact tool for verifying the estimated ~400–600 m range and the `RSSI_FALLING_BACK_*` thresholds in the field (see [Verification](#verification)).
+Settings → **Test** shows for one rider, live: large, the smoothed RSSI (the value the falling-back logic judges — marked `!NAME!`/`(NAME)` the same way as the idle screen list, but reflecting *this device's own* local verdict, not the group-corroborated one), below it the raw RSSI and the trend (fast − slow, in dB) for that rider, and below that the group's self-calibrated **baseline** and the **floor** currently being judged against. Short press switches the observed rider, long press exits. **No timeout, no display sleep** in this mode — a range walk takes minutes of glancing, and you explicitly started the mode. The exact tool for verifying the estimated ~400–600 m range and watching the self-calibrated floor track real conditions in the field (see [Verification](#verification)).
 
 ### Changing the name on the device (no laptop needed)
 
@@ -311,10 +314,10 @@ Once "Name" is confirmed with a long press in settings, the name is entered char
 
 Every device sends a heartbeat with nickname + battery voltage roughly every ~2 s (slightly randomized). Every receiver derives **two** smoothed signal-strength averages (RSSI EMAs) per rider from this: a fast one ("where the signal is right now") and a slow one as a baseline ("where it usually sits", time constant ~40 s):
 
-- **"Falling back"**: the fast average has dropped below the **adjustable threshold** (Settings → Sensitivity, level 0–10 in 3 dB steps from −120 to −90 dBm; default level 5 = −105 dBm) **and** is ≥6 dB below the slow baseline → early warning on the idle screen. Comparing against the baseline (instead of the immediately preceding heartbeat) also catches **gradual** falling back — with only one EMA, the raw RSSI would have had to collapse by ~17 dB within a single heartbeat interval.
+- **"Falling back"**: the fast average has dropped below the **self-calibrated floor** — the group's own current baseline signal (median slow-EMA RSSI across everyone still present) minus a margin (Settings → Sensitivity, level 0–10 = 30 dB down to 0 dB below baseline) — **and** is ≥6 dB below its own slow baseline → early warning on the idle screen. Comparing against the baseline (instead of the immediately preceding heartbeat) also catches **gradual** falling back — with only one EMA, the raw RSSI would have had to collapse by ~17 dB within a single heartbeat interval. The floor itself adapts automatically to the group's current signal (terrain, formation, antenna placement) rather than a number picked once by hand and never revisited — see `src/calibration.{h,cpp}`. Until at least 2 peers are present to calibrate against (fresh boot, riding alone), it falls back to the historical fixed −105 dBm floor.
 - **"Dropped off"**: no signal at all for ~5.8 s → a clear alert with a timestamp. The threshold (`DROPPED_OFF_TIMEOUT_MS`) deliberately budgets 2 full intervals **including send jitter** plus margin — a single lost heartbeat (e.g. because two half-duplex senders overlapped) doesn't trigger a false alarm this way; it takes two missing in a row.
 
-Both are automatic, no button press needed. Thresholds live as constants in `src/config.h` (`RSSI_FALLING_BACK_*`, `RSSI_EMA_ALPHA_*`, `DROPPED_OFF_MISSED_INTERVALS`/`DROPPED_OFF_TIMEOUT_MS`) and can be re-tuned after initial field tests.
+Both are automatic, no button press needed. Thresholds live as constants in `src/config.h` (`RSSI_FALLING_BACK_DROP_DB`, `RSSI_EMA_ALPHA_*`, `CAL_*`, `DROPPED_OFF_MISSED_INTERVALS`/`DROPPED_OFF_TIMEOUT_MS`), with the baseline/floor math itself in `src/calibration.{h,cpp}`; both can be re-tuned after initial field tests.
 
 ## Radio protocol (quick reference)
 
@@ -337,10 +340,11 @@ With **at least 2 devices**:
 7. Enable **Mute** (Settings) → an incoming warning appears without a beep, the header shows `MUTE`. Turn it off again afterward.
 8. **Drop-off reminder**: leave one device off → after ~60 s, 1 short reminder beep; after ~120 s, the prompt `Still dropped off: (NAME)` → long press removes the rider (disappears from the list and counter, no more reminders). Turn the device back on → the rider comes back automatically with `BACK`.
 9. **Channel test**: set one device to channel 1 (Settings → Channel) → the devices lose each other (`DROPPED` after ~6 s); back to 0 → `BACK`.
-10. **Sensitivity**: set it to level 10 and put one device in another room → `WEAK` comes noticeably earlier than at level 5; at level 0, `WEAK` no longer occurs at all, only the drop-off.
+10. **Sensitivity**: set it to level 10 and put one device in another room → `WEAK` comes noticeably earlier than at level 5; at level 0, `WEAK` requires a much larger sag below the group before it fires (the floor is baseline-relative now, not a fixed "off" endpoint like the old design). Watch the range test's `base`/`floor` line while changing levels to see the floor move in real time.
 11. **Stats** (Settings) → ride time is running, warning/drop-off counters match the previous test steps.
-12. Only once these steps work on the table, test in the field (a real ride) — that's what the **range test** (Settings → Test) is for: read the actual GFSK range live over the distances relevant in a group ride (the ~400–600 m is a datasheet estimate, not a field measurement), and fine-tune the heartbeat interval/RSSI thresholds as needed.
-13. **USB charging mode**: plug a device with a battery fitted into USB power → within a few seconds the charging screen appears (battery %, voltage, charge current, your name), the other device shows this one `DROPPED` shortly after (radio is suspended). Confirm the sensed current with `charge` on the console — flip `INA219_CURRENT_CHARGE_SIGN` in `src/config.h` if it reads negative while charging. Wait 10 s → the screen goes dark; press the button → it comes back for another 10 s. Unplug → the device rejoins the group (`BACK`) within a few seconds. Repeat with a **battery-less** test device on USB power only → it must stay in normal operation the whole time, never showing the charging screen.
+12. Only once these steps work on the table, test in the field (a real ride) — that's what the **range test** (Settings → Test) is for: read the actual GFSK range live over the distances relevant in a group ride (the ~400–600 m is a datasheet estimate, not a field measurement), watch the self-calibrated baseline/floor settle as the group rides together, and fine-tune the heartbeat interval/margin as needed.
+13. **Calibration trace**: `trace on` on the console, ride/walk around for a few minutes with 2+ devices, then `trace off` and `trace dump` — a CSV of raw/fast/slow RSSI + group baseline/floor per peer, one row per tracked peer per second, for post-ride analysis of how the floor tracked the group. `trace clear` discards it.
+14. **USB charging mode**: plug a device with a battery fitted into USB power → within a few seconds the charging screen appears (battery %, voltage, charge current, your name), the other device shows this one `DROPPED` shortly after (radio is suspended). Confirm the sensed current with `charge` on the console — flip `INA219_CURRENT_CHARGE_SIGN` in `src/config.h` if it reads negative while charging. Wait 10 s → the screen goes dark; press the button → it comes back for another 10 s. Unplug → the device rejoins the group (`BACK`) within a few seconds. Repeat with a **battery-less** test device on USB power only → it must stay in normal operation the whole time, never showing the charging screen.
 
 ## Open items for later
 

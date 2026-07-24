@@ -50,8 +50,9 @@ constexpr size_t kSettingsItemBack = 8;
 size_t settingsIndex = 0;
 
 // RangeTest ("Test" in settings): live RSSI readout for one chosen peer, the
-// field tool for verifying real-world range and tuning the RSSI_FALLING_BACK_*
-// thresholds (see README "Verification"). Index into the roster's slot order.
+// field tool for verifying real-world range and watching the self-calibrated
+// falling-back floor track the group baseline (see README "Verification" and
+// calibration.h). Index into the roster's slot order.
 int rangeTestIndex = 0;
 
 // Mute switch for all alert beeps. Deliberately NOT persisted: after a restart
@@ -633,22 +634,54 @@ void renderRangeTest() {
     }
   }
 
+  // Big readout: name + fast-smoothed RSSI, marked with the same "!NAME!"/
+  // "(NAME)" convention as the rider list (decorateNickname()) but keyed on
+  // this device's own *local* verdict (p.localFallingBack), not the
+  // group-consensus-gated p.fallingBack -- this screen exists specifically to
+  // calibrate the local heuristic, so it shows what this device itself is
+  // seeing even if the group hasn't (yet, or ever, with too few observers)
+  // corroborated it.
   display.setFont(u8g2_font_9x15B_tf);
-  char big[24];
-  snprintf(big, sizeof(big), "%s %d", p.nickname, p.rssiDbm);
+  char deco[18];
+  const char *markerFmt = p.droppedOff ? "(%s)" : (p.localFallingBack ? "!%s!" : "%s");
+  snprintf(deco, sizeof(deco), markerFmt, p.nickname);
+  char big[26];
+  snprintf(big, sizeof(big), "%s %d", deco, p.rssiDbm);
   display.drawStr(0, 34, big);
 
-  display.setFont(u8g2_font_6x10_tf);
-  char detail[28];
+  // Two compact calibration lines in the small ruler font (u8g2_font_4x6_tf,
+  // also used by drawLevelRuler() below) -- there's no room for two more
+  // full 6x10 lines above the footer, and this detail is meant to be read
+  // stopped at the roadside while calibrating, not at a glance while riding.
+  display.setFont(u8g2_font_4x6_tf);
+  char calLine1[32];
   if (p.droppedOff) {
     uint32_t ageS = (millis() - p.lastSeenMs) / 1000;
-    snprintf(detail, sizeof(detail), "DROPPED  %lus ago", static_cast<unsigned long>(ageS));
+    snprintf(calLine1, sizeof(calLine1), "DROPPED  %lus ago", static_cast<unsigned long>(ageS));
   } else {
-    snprintf(detail, sizeof(detail), "raw %d dBm  %lus ago", p.lastRawRssiDbm,
-             static_cast<unsigned long>((millis() - p.lastSeenMs) / 1000));
+    // trend = fast EMA minus slow EMA -- the same quantity onHeartbeat()
+    // compares against -RSSI_FALLING_BACK_DROP_DB; negative means sagging
+    // away from this peer's own baseline, regardless of the group floor.
+    int trend = p.rssiDbm - p.rssiSlowDbm;
+    snprintf(calLine1, sizeof(calLine1), "raw %d dBm   trend %+d dB", p.lastRawRssiDbm, trend);
   }
-  display.drawStr(0, 46, detail);
+  display.drawStr(0, 44, calLine1);
 
+  // Group baseline + the floor actually being judged against right now (see
+  // Roster::groupBaselineDbm()/activeFloorDbm(), calibration.h) -- shown
+  // regardless of whether the *subject* above is dropped, since both are
+  // properties of the group, not of any one peer.
+  char calLine2[32];
+  if (Roster::baselineEstablished()) {
+    snprintf(calLine2, sizeof(calLine2), "base %d dBm   floor %d dBm", Roster::groupBaselineDbm(),
+             Roster::activeFloorDbm());
+  } else {
+    snprintf(calLine2, sizeof(calLine2), "base n/a (need %d+ peers)  floor %d", CAL_MIN_PEERS_FOR_BASELINE,
+             Roster::activeFloorDbm());
+  }
+  display.drawStr(0, 53, calLine2);
+
+  display.setFont(u8g2_font_6x10_tf);
   display.drawStr(0, 61, "short=rider long=exit");
 }
 

@@ -240,16 +240,28 @@ def rename(cells, cursor_idx, footer):
 write("rename-active", rename(["R", "O", " ", " ", " "], 1, "short=char long=OK"))
 write("rename-finish", rename(["K", "L", "A", "U", "S"], 4, "long=done"))
 
-# --- 18/19. Range test ------------------------------------------------------------
+# --- 18/19/20. Range test ---------------------------------------------------------
+# Big readout + two small calibration lines (raw/trend, then group
+# base/floor) -- see renderRangeTest() in ui.cpp. The two detail lines use the
+# same small ruler font as the tone/sensitivity rulers below (size=5).
 b = header("Range test:")
 b += text(0, 34, "MAX -87", size=13, weight="bold")
-b += text(0, 46, "raw -85 dBm  2s ago", size=8)
+b += text(0, 44, "raw -85 dBm   trend -2 dB", size=5)
+b += text(0, 53, "base -80 dBm   floor -95 dBm", size=5)
 b += text(0, 61, "short=rider long=exit", size=8)
 write("range-test", b)
 
 b = header("Range test:")
-b += text(0, 34, "MAX -104", size=13, weight="bold")
-b += text(0, 46, "DROPPED  40s ago", size=8)
+b += text(0, 34, "!MAX! -101", size=13, weight="bold")
+b += text(0, 44, "raw -103 dBm   trend -7 dB", size=5)
+b += text(0, 53, "base -80 dBm   floor -95 dBm", size=5)
+b += text(0, 61, "short=rider long=exit", size=8)
+write("range-test-weak", b)
+
+b = header("Range test:")
+b += text(0, 34, "(MAX) -104", size=13, weight="bold")
+b += text(0, 44, "DROPPED  40s ago", size=5)
+b += text(0, 53, "base -80 dBm   floor -95 dBm", size=5)
 b += text(0, 61, "short=rider long=exit", size=8)
 write("range-test-dropped", b)
 

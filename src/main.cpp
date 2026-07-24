@@ -11,6 +11,7 @@
 #include "radio.h"
 #include "roster.h"
 #include "stats.h"
+#include "trace.h"
 #include "ui.h"
 
 namespace {
@@ -152,6 +153,7 @@ void setup() {
   Radio::begin();
   Roster::begin();
   Coop::begin();
+  Trace::begin();
 
   // random() (used for heartbeat jitter, see randomizedHeartbeatInterval())
   // is otherwise unseeded, so devices booted around the same time would draw
@@ -236,6 +238,7 @@ void loop() {
 
   if (static_cast<int32_t>(now - nextRosterTickMs) >= 0) {
     Roster::tick(now); // also drives Coop::tick() internally
+    Trace::sample(now); // no-op unless `trace on` -- see trace.h
     nextRosterTickMs = now + 1000;
   }
 

@@ -125,13 +125,22 @@ unambiguous hint.
 ![Range test](mockups/range-test.svg)
 
 **Range test.** Settings → Test. Live: the smoothed RSSI (the value the falling-back logic judges)
-large, raw RSSI + heartbeat age small. **No** timeout, **no** display sleep — exit only via **long
-press**. The field tool for the `RSSI_FALLING_BACK_*` thresholds.
+large, then two small lines — raw RSSI and the trend (fast − slow, in dB) for that rider, then the
+group's self-calibrated baseline and the floor currently being judged against (see
+`src/calibration.{h,cpp}`). **No** timeout, **no** display sleep — exit only via **long press**.
+The field tool for watching the self-calibrated floor track real conditions.
+
+![Range test, falling back](mockups/range-test-weak.svg)
+
+**Range test: falling back.** The big readout is marked `!NAME!` — the same convention as the idle
+screen's rider list, but reflecting *this device's own* local verdict, not the group-corroborated
+one (this screen exists to calibrate the local heuristic itself).
 
 ![Range test, dropped off](mockups/range-test-dropped.svg)
 
-**Range test: dropped off.** If the watched rider has dropped off, the last smoothed RSSI stays
-put and the detail line shows `DROPPED` plus the age of the last heartbeat.
+**Range test: dropped off.** If the watched rider has dropped off, the big readout is marked
+`(NAME)` and the first detail line shows `DROPPED` plus the age of the last heartbeat — the
+baseline/floor line keeps showing, since both are properties of the group, not of this one peer.
 
 ## Charging screen
 

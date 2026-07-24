@@ -23,6 +23,7 @@ struct PeerInfo {
   uint16_t nodeId; // for Roster::dismiss()
   char nickname[Protocol::kNicknameFieldLen + 1];
   int16_t rssiDbm; // fast-smoothed (EMA), the value this device's own local verdict judges
+  int16_t rssiSlowDbm; // slow-smoothed (EMA) -- "where the signal usually sits", the trend baseline
   int16_t lastRawRssiDbm; // unsmoothed RSSI of the most recent heartbeat
   uint16_t batteryMillivolts; // 0 if the peer has no battery monitor
   // Group-consensus-gated, not purely local: e.g. droppedOff can be false
@@ -30,6 +31,13 @@ struct PeerInfo {
   // rest of the group still hears them (see Roster::tick()).
   bool fallingBack;
   bool droppedOff;
+  // This device's own, purely local falling-back opinion (see Peer::localWeak
+  // in roster.cpp), *before* group-consensus gating -- distinct from
+  // `fallingBack` above. Exposed for the range-test screen, which is
+  // specifically the field-calibration tool and wants to show what this
+  // device itself is seeing, not the (possibly not-yet-corroborated) group
+  // verdict.
+  bool localFallingBack;
   uint32_t lastSeenMs;
 };
 
@@ -96,5 +104,25 @@ uint32_t lastAlertGeneration();
 // Which event lastAlertTimestampMs() refers to. Only meaningful once
 // lastAlertTimestampMs() is non-zero.
 AlertType lastAlertType();
+
+// The self-calibrated "group baseline" RSSI this device is currently using to
+// derive the falling-back floor (median slow-EMA RSSI across the intact
+// group, smoothed -- see Calibration::medianDbm()/smoothBaseline() in
+// calibration.{h,cpp} and Roster::tick()). Only meaningful when
+// baselineEstablished() is true; returns RSSI_FALLING_BACK_FLOOR_DBM
+// verbatim otherwise (matching the fixed-floor fallback, so callers that
+// don't check baselineEstablished() still show something sane).
+int16_t groupBaselineDbm();
+
+// True once enough peers are present to trust groupBaselineDbm() (see
+// CAL_MIN_PEERS_FOR_BASELINE in config.h) -- false right after boot or when
+// riding alone, in which case falling-back detection uses the fixed fallback
+// floor instead.
+bool baselineEstablished();
+
+// The floor currently in effect for a given peer's falling-back check -- the
+// same value onHeartbeat() itself computes and judges rssiDbm against; for
+// the range-test screen so it can show exactly what's being compared.
+int16_t activeFloorDbm();
 
 } // namespace Roster

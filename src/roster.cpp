@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "calibration.h"
 #include "config.h"
 #include "coop.h"
 #include "stats.h"
@@ -53,6 +54,57 @@ struct Peer {
 };
 
 Peer peers[MAX_PEERS];
+
+// Self-calibrated group baseline RSSI (median slow-EMA across the intact
+// group, smoothed) and whether enough peers are present to trust it -- see
+// updateGroupBaseline() and calibration.h. Read by onHeartbeat() (via
+// currentFloorDbm()) to derive the falling-back floor, and exposed to the
+// range-test screen via Roster::groupBaselineDbm()/baselineEstablished()/
+// activeFloorDbm().
+float groupBaselineDbm_ = 0.0f;
+bool baselineEstablished_ = false;
+
+// Recomputes groupBaselineDbm_/baselineEstablished_ from the current peer
+// set. Called once per tick() (~1/s) -- onHeartbeat() (which runs far more
+// often, once per received heartbeat) just reads the result rather than
+// recomputing it itself, since the baseline is a property of the whole group,
+// not of any one peer's heartbeat.
+void updateGroupBaseline() {
+  float samples[MAX_PEERS];
+  int n = 0;
+  for (auto &p : peers) {
+    // Same presence bar as the consensus loop in tick(): dropped-off or
+    // dismissed peers aren't part of "the intact group" the baseline should
+    // reflect, and hasPreviousEma excludes anyone whose EMAs are still
+    // fresh-seeded (one heartbeat old) and therefore not yet a trend.
+    if (p.used && !p.dismissed && !p.effectiveDropped && p.hasPreviousEma) {
+      samples[n++] = p.rssiEmaSlow;
+    }
+  }
+  if (n < CAL_MIN_PEERS_FOR_BASELINE) {
+    baselineEstablished_ = false;
+    return;
+  }
+  float median = Calibration::medianDbm(samples, n);
+  // Seed directly on the first tick a baseline becomes established (nothing
+  // sane to blend against yet); smooth on every tick after that so the
+  // baseline doesn't jump around with the peer set the way the instantaneous
+  // median would.
+  groupBaselineDbm_ =
+      baselineEstablished_ ? Calibration::smoothBaseline(groupBaselineDbm_, median, CAL_BASELINE_ALPHA) : median;
+  baselineEstablished_ = true;
+}
+
+// The floor currently in effect: baseline-relative once established, the
+// fixed fallback otherwise. A pure function of module state + the current
+// sensitivity setting -- same value for every peer at a given moment, which
+// is why Roster::activeFloorDbm() can just call this too instead of storing
+// a per-peer copy.
+int16_t currentFloorDbm() {
+  return Calibration::deriveFloorDbm(groupBaselineDbm_, fallingBackMarginDb(DeviceConfig::fallingBackSensitivity()),
+                                      baselineEstablished_, RSSI_FALLING_BACK_FLOOR_DBM, CAL_FLOOR_MIN_DBM,
+                                      CAL_FLOOR_MAX_DBM);
+}
 
 char lastEventBuf[24] = {0};
 uint32_t lastEventMs = 0;
@@ -193,9 +245,12 @@ void onHeartbeat(uint16_t nodeId, const char *nickname, uint16_t batteryMillivol
         RSSI_EMA_ALPHA_SLOW * static_cast<float>(rssi) + (1.0f - RSSI_EMA_ALPHA_SLOW) * peer->rssiEmaSlow;
 
     bool wasLocalWeak = peer->localWeak;
-    // Floor is user-adjustable (0..10, settings menu); re-evaluated on every
-    // heartbeat, so a changed step takes effect within one interval.
-    int16_t floorDbm = fallingBackFloorDbm(DeviceConfig::fallingBackSensitivity());
+    // Floor is self-calibrated from the group baseline (see
+    // updateGroupBaseline(), called once per tick()) plus the user-adjustable
+    // margin (0..10, settings menu); re-evaluated on every heartbeat, so a
+    // changed sensitivity step -- or a baseline that has since shifted --
+    // takes effect within one interval.
+    int16_t floorDbm = currentFloorDbm();
     peer->localWeak = peer->hasPreviousEma &&
                        peer->rssiEmaFast < floorDbm &&
                        peer->rssiEmaFast < (peer->rssiEmaSlow - RSSI_FALLING_BACK_DROP_DB);
@@ -210,6 +265,11 @@ void onHeartbeat(uint16_t nodeId, const char *nickname, uint16_t batteryMillivol
 }
 
 void tick(uint32_t nowMs) {
+  // Refresh the self-calibrated group baseline before anything below reads
+  // it (onHeartbeat() already has, for heartbeats received since the last
+  // tick -- this just brings it current for the *next* interval).
+  updateGroupBaseline();
+
   // This device + every peer it's still tracking (dismissed ones excluded,
   // same headcount totalCount() already reports) -- the consensus quorum
   // denominator, computed once per tick rather than per peer.
@@ -300,10 +360,12 @@ bool peerInfo(int index, PeerInfo &out) {
       strncpy(out.nickname, p.nickname, sizeof(out.nickname) - 1);
       out.nickname[sizeof(out.nickname) - 1] = '\0';
       out.rssiDbm = static_cast<int16_t>(lroundf(p.rssiEmaFast));
+      out.rssiSlowDbm = static_cast<int16_t>(lroundf(p.rssiEmaSlow));
       out.lastRawRssiDbm = p.lastRawRssi;
       out.batteryMillivolts = p.batteryMillivolts;
       out.fallingBack = p.effectiveWeak;
       out.droppedOff = p.effectiveDropped;
+      out.localFallingBack = p.localWeak;
       out.lastSeenMs = p.lastSeenMs;
       return true;
     }
@@ -375,5 +437,13 @@ uint32_t lastAlertTimestampMs() { return lastAlertMs; }
 uint32_t lastAlertGeneration() { return alertGeneration; }
 
 AlertType lastAlertType() { return lastAlertType_; }
+
+int16_t groupBaselineDbm() {
+  return baselineEstablished_ ? static_cast<int16_t>(lroundf(groupBaselineDbm_)) : RSSI_FALLING_BACK_FLOOR_DBM;
+}
+
+bool baselineEstablished() { return baselineEstablished_; }
+
+int16_t activeFloorDbm() { return currentFloorDbm(); }
 
 } // namespace Roster
